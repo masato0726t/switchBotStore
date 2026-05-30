@@ -10,6 +10,7 @@ type Config struct {
 	Database               DBConfig  `json:"database"`
 	Accounts               []Account `json:"accounts"`
 	CollectIntervalMinutes int       `json:"collect_interval_minutes"`
+	LogDir                 string    `json:"log_dir"`
 }
 
 type DBConfig struct {

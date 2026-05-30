@@ -10,6 +10,7 @@ import (
 	"switchBotStore/internal/collector"
 	"switchBotStore/internal/config"
 	"switchBotStore/internal/database"
+	"switchBotStore/internal/logger"
 	"switchBotStore/internal/repository"
 	"switchBotStore/internal/switchbot"
 )
@@ -21,7 +22,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("[ERROR] 設定ファイルの読み込みに失敗しました: %v", err)
 	}
+
+	closeLog, err := logger.Setup(cfg.LogDir)
+	if err != nil {
+		log.Printf("[WARN] ログファイルの設定に失敗しました（標準出力のみ使用します）: %v", err)
+		closeLog = func() {}
+	}
+	defer closeLog()
+
 	log.Printf("[INFO] 設定を読み込みました (アカウント数: %d)", len(cfg.Accounts))
+	if cfg.LogDir != "" {
+		log.Printf("[INFO] ログ出力先: %s", cfg.LogDir)
+	}
 
 	db, err := database.Connect(cfg.Database)
 	if err != nil {
