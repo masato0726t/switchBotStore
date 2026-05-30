@@ -16,6 +16,7 @@ type Logger struct {
 	file   *os.File
 	mu     sync.Mutex
 	stopCh chan struct{}
+	wg     sync.WaitGroup
 }
 
 // Setup はログ出力先を設定し、終了時に呼ぶクローズ関数を返す。
@@ -34,12 +35,17 @@ func Setup(logDir string) (func(), error) {
 		return nil, err
 	}
 
-	go l.rotateDailyLoop()
+	l.wg.Add(1)
+	go func() {
+		defer l.wg.Done()
+		l.rotateDailyLoop()
+	}()
 
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			close(l.stopCh)
+			l.wg.Wait() // goroutine が完全に停止してからファイルを閉じる
 			l.mu.Lock()
 			defer l.mu.Unlock()
 			if l.file != nil {
@@ -50,8 +56,12 @@ func Setup(logDir string) (func(), error) {
 	}, nil
 }
 
-// openFile は指定した日付のログファイルを開き、log.SetOutput を更新する
+// openFile は指定した日付のログファイルを開き、log.SetOutput を更新する。
+// ミューテックスをファイルオープン前から保持することで二重オープンを防ぐ。
 func (l *Logger) openFile(t time.Time) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	if err := os.MkdirAll(l.logDir, 0755); err != nil {
 		return fmt.Errorf("ログディレクトリの作成に失敗 (%s): %v", l.logDir, err)
 	}
@@ -61,9 +71,6 @@ func (l *Logger) openFile(t time.Time) error {
 	if err != nil {
 		return fmt.Errorf("ログファイルのオープンに失敗 (%s): %v", filename, err)
 	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
 
 	if l.file != nil {
 		l.file.Close()
@@ -78,16 +85,21 @@ func (l *Logger) openFile(t time.Time) error {
 func (l *Logger) rotateDailyLoop() {
 	for {
 		now := time.Now()
-		tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 1, 0, now.Location())
+		// seconds=0 で正確に翌日0時0分0秒を指定する
+		tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+
+		// time.NewTimer を使い、stopCh 受信時に明示的に Stop してリソースを解放する
+		timer := time.NewTimer(tomorrow.Sub(now))
 
 		select {
-		case <-time.After(tomorrow.Sub(now)):
+		case <-timer.C:
 			if err := l.openFile(time.Now()); err != nil {
 				log.Printf("[WARN] ログファイルのローテーションに失敗しました: %v", err)
 			} else {
 				log.Printf("[INFO] ログファイルをローテーションしました")
 			}
 		case <-l.stopCh:
+			timer.Stop()
 			return
 		}
 	}

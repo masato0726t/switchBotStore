@@ -15,23 +15,44 @@ import (
 	"switchBotStore/internal/switchbot"
 )
 
+// defaultLogDir は config.json を読み込む前に使う暫定ログディレクトリ。
+// config.Load より先にログファイルを開くことで、起動時エラーもファイルに記録できる。
+const defaultLogDir = "logs"
+
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmsgprefix)
+
+	// closeLog を間接参照で defer することで、後から再代入しても正しい関数が呼ばれる
+	var closeLog = func() {}
+	defer func() { closeLog() }()
+
+	// config.Load より前にデフォルトのログディレクトリでファイルを開く
+	if cl, err := logger.Setup(defaultLogDir); err != nil {
+		log.Printf("[WARN] デフォルトログの設定に失敗しました: %v", err)
+	} else {
+		closeLog = cl
+	}
 
 	cfg, err := config.Load("config.json")
 	if err != nil {
 		log.Fatalf("[ERROR] 設定ファイルの読み込みに失敗しました: %v", err)
 	}
-
-	closeLog, err := logger.Setup(cfg.LogDir)
-	if err != nil {
-		log.Printf("[WARN] ログファイルの設定に失敗しました（標準出力のみ使用します）: %v", err)
-		closeLog = func() {}
-	}
-	defer closeLog()
-
 	log.Printf("[INFO] 設定を読み込みました (アカウント数: %d)", len(cfg.Accounts))
-	if cfg.LogDir != "" {
+
+	// config.json の log_dir がデフォルトと異なる場合は切り替える
+	if cfg.LogDir != defaultLogDir {
+		closeLog()            // デフォルトのログファイルを閉じる
+		closeLog = func() {}  // フェイルセーフ：再設定に失敗しても defer が安全に呼ばれる
+
+		if cfg.LogDir != "" {
+			if cl, err := logger.Setup(cfg.LogDir); err != nil {
+				log.Printf("[WARN] ログファイルの設定に失敗しました（標準出力のみ使用します）: %v", err)
+			} else {
+				closeLog = cl
+				log.Printf("[INFO] ログ出力先: %s", cfg.LogDir)
+			}
+		}
+	} else if cfg.LogDir != "" {
 		log.Printf("[INFO] ログ出力先: %s", cfg.LogDir)
 	}
 
