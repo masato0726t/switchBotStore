@@ -1,0 +1,33 @@
+# 設定ファイル（APIトークン・DB認証情報を含む）
+config.json
+
+# ビルド成果物
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/switchBotStore
+
+# Go モジュールキャッシュ・ワークスペース
+/vendor/
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ログファイル
+*.log

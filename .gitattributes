@@ -1,0 +1,10 @@
+# テキストファイルの改行コードを自動変換
+* text=auto
+
+# GoソースはLFで統一
+*.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.gitignore text eol=lf

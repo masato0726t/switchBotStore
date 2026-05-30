@@ -1,0 +1,89 @@
+package main
+
+import (
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"switchBotStore/internal/collector"
+	"switchBotStore/internal/config"
+	"switchBotStore/internal/database"
+	"switchBotStore/internal/repository"
+	"switchBotStore/internal/switchbot"
+)
+
+func main() {
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmsgprefix)
+
+	cfg, err := config.Load("config.json")
+	if err != nil {
+		log.Fatalf("[ERROR] 設定ファイルの読み込みに失敗しました: %v", err)
+	}
+	log.Printf("[INFO] 設定を読み込みました (アカウント数: %d)", len(cfg.Accounts))
+
+	db, err := database.Connect(cfg.Database)
+	if err != nil {
+		log.Fatalf("[ERROR] データベースへの接続に失敗しました: %v", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("[WARN] DB接続のクローズに失敗しました: %v", err)
+		}
+	}()
+
+	if err := database.Migrate(db); err != nil {
+		log.Fatalf("[ERROR] テーブルのマイグレーションに失敗しました: %v", err)
+	}
+
+	clients := make([]switchbot.Client, 0, len(cfg.Accounts))
+	for _, acc := range cfg.Accounts {
+		clients = append(clients, switchbot.NewClient(acc.Token, acc.Secret, acc.Name))
+		log.Printf("[INFO] アカウント登録: %s", acc.Name)
+	}
+
+	repo := repository.NewSQL(db)
+	col := collector.New(repo, clients)
+
+	firstRun, err := database.IsFirstRun(db)
+	if err != nil {
+		log.Fatalf("[ERROR] 初回起動チェックに失敗しました: %v", err)
+	}
+
+	if firstRun {
+		log.Println("[INFO] 初回起動を検出しました。全デバイスの初期データを収集します...")
+		if err := col.InitialCollect(); err != nil {
+			log.Printf("[WARN] 初期データ収集中にエラーが発生しました: %v", err)
+		}
+		if err := database.MarkFirstRunDone(db); err != nil {
+			log.Printf("[WARN] 初回起動フラグの保存に失敗しました: %v", err)
+		} else {
+			log.Println("[INFO] 初期データ収集が完了しました")
+		}
+	}
+
+	interval := time.Duration(cfg.CollectIntervalMinutes) * time.Minute
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	log.Printf("[INFO] 定期収集を開始します (間隔: %d分)", cfg.CollectIntervalMinutes)
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+
+	for {
+		select {
+		case t := <-ticker.C:
+			log.Printf("[INFO] 定期収集を開始します (%s)", t.Format("2006-01-02 15:04:05"))
+			if err := col.Collect(); err != nil {
+				log.Printf("[WARN] データ収集中にエラーが発生しました: %v", err)
+			} else {
+				log.Println("[INFO] 定期収集が完了しました")
+			}
+		case s := <-sig:
+			log.Printf("[INFO] シグナル (%v) を受信しました。終了します...", s)
+			return
+		}
+	}
+}

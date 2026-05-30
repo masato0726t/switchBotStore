@@ -1,0 +1,22 @@
+{
+  "database": {
+    "host": "localhost",
+    "port": 3306,
+    "user": "root",
+    "password": "your_password",
+    "name": "switchbot_db"
+  },
+  "accounts": [
+    {
+      "name": "メインアカウント",
+      "token": "your_switchbot_token_1",
+      "secret": "your_switchbot_secret_1"
+    },
+    {
+      "name": "サブアカウント",
+      "token": "your_switchbot_token_2",
+      "secret": "your_switchbot_secret_2"
+    }
+  ],
+  "collect_interval_minutes": 5
+}
