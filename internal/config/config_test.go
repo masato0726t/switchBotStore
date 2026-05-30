@@ -25,8 +25,7 @@ func TestLoad_ValidConfig(t *testing.T) {
 		"accounts": [
 			{"name": "acc1", "token": "tok1", "secret": "sec1"},
 			{"name": "acc2", "token": "tok2", "secret": "sec2"}
-		],
-		"collect_interval_minutes": 10
+		]
 	}`)
 
 	cfg, err := Load(path)
@@ -44,24 +43,6 @@ func TestLoad_ValidConfig(t *testing.T) {
 	}
 	if cfg.Accounts[0].Token != "tok1" {
 		t.Errorf("Accounts[0].Token = %q, want %q", cfg.Accounts[0].Token, "tok1")
-	}
-	if cfg.CollectIntervalMinutes != 10 {
-		t.Errorf("CollectIntervalMinutes = %d, want 10", cfg.CollectIntervalMinutes)
-	}
-}
-
-func TestLoad_DefaultInterval(t *testing.T) {
-	path := writeConfigFile(t, `{
-		"database": {"host": "localhost", "user": "root", "password": "pw", "name": "mydb"},
-		"accounts": [{"name": "a", "token": "t", "secret": "s"}]
-	}`)
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("エラーが発生しない想定: %v", err)
-	}
-	if cfg.CollectIntervalMinutes != 5 {
-		t.Errorf("デフォルト値 CollectIntervalMinutes = %d, want 5", cfg.CollectIntervalMinutes)
 	}
 }
 

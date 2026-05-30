@@ -7,10 +7,9 @@ import (
 )
 
 type Config struct {
-	Database               DBConfig  `json:"database"`
-	Accounts               []Account `json:"accounts"`
-	CollectIntervalMinutes int       `json:"collect_interval_minutes"`
-	LogDir                 string    `json:"log_dir"`
+	Database DBConfig  `json:"database"`
+	Accounts []Account `json:"accounts"`
+	LogDir   string    `json:"log_dir"`
 }
 
 type DBConfig struct {
@@ -34,9 +33,7 @@ func Load(path string) (*Config, error) {
 	}
 	defer f.Close()
 
-	cfg := &Config{
-		CollectIntervalMinutes: 5,
-	}
+	cfg := &Config{}
 	if err := json.NewDecoder(f).Decode(cfg); err != nil {
 		return nil, fmt.Errorf("設定ファイルのパースに失敗: %v", err)
 	}

@@ -18,6 +18,5 @@
       "secret": "your_switchbot_secret_2"
     }
   ],
-  "collect_interval_minutes": 5,
   "log_dir": "logs"
 }

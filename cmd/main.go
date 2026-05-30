@@ -2,10 +2,6 @@ package main
 
 import (
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
 	"switchBotStore/internal/collector"
 	"switchBotStore/internal/config"
@@ -41,8 +37,8 @@ func main() {
 
 	// config.json の log_dir がデフォルトと異なる場合は切り替える
 	if cfg.LogDir != defaultLogDir {
-		closeLog()            // デフォルトのログファイルを閉じる
-		closeLog = func() {}  // フェイルセーフ：再設定に失敗しても defer が安全に呼ばれる
+		closeLog()           // デフォルトのログファイルを閉じる
+		closeLog = func() {} // フェイルセーフ：再設定に失敗しても defer が安全に呼ばれる
 
 		if cfg.LogDir != "" {
 			if cl, err := logger.Setup(cfg.LogDir); err != nil {
@@ -94,29 +90,13 @@ func main() {
 		} else {
 			log.Println("[INFO] 初期データ収集が完了しました")
 		}
+		return
 	}
 
-	interval := time.Duration(cfg.CollectIntervalMinutes) * time.Minute
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	log.Printf("[INFO] 定期収集を開始します (間隔: %d分)", cfg.CollectIntervalMinutes)
-
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-
-	for {
-		select {
-		case t := <-ticker.C:
-			log.Printf("[INFO] 定期収集を開始します (%s)", t.Format("2006-01-02 15:04:05"))
-			if err := col.Collect(); err != nil {
-				log.Printf("[WARN] データ収集中にエラーが発生しました: %v", err)
-			} else {
-				log.Println("[INFO] 定期収集が完了しました")
-			}
-		case s := <-sig:
-			log.Printf("[INFO] シグナル (%v) を受信しました。終了します...", s)
-			return
-		}
+	log.Println("[INFO] データ収集を開始します")
+	if err := col.Collect(); err != nil {
+		log.Printf("[WARN] データ収集中にエラーが発生しました: %v", err)
+	} else {
+		log.Println("[INFO] データ収集が完了しました")
 	}
 }
