@@ -36,3 +36,6 @@ Desktop.ini
 
 # 作業用のスクラッチ領域（設計・計画は docs/ 配下に残す）
 /.superpowers/
+
+# 設計・実装計画（作業用。リポジトリには含めない）
+docs/superpowers/
