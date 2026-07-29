@@ -3388,6 +3388,24 @@ go build ./cmd/switchbotstore/
    SELECT COUNT(*) FROM devices;
    SELECT COUNT(*) FROM system_settings;  -- 旧テーブルも残っている
    ```
+7. **MySQL ドライバ更新の影響がないこと**（Task 7 のレビュー指摘への対応）:
+
+   `go-sql-driver/mysql` が v1.7.1 から v1.10.0 に上がっている。`gorm.io/driver/mysql v1.6.0` が v1.8.1 以上を要求するため不可避で、v1.8.1 に固定しても下記の変更は避けられない（変更が入ったのは v1.8.0 のため）。
+
+   v1.8.0 の変更のうち本ツールに関係し得るのは、接続時のコレーション決定が `SET NAMES <charset> COLLATE <collation>` 方式に変わり、charset のみ指定した場合はサーバー既定のコレーションが使われる点。以下を確認する。
+
+   ```sql
+   -- 日本語のデバイス名・アカウント名が文字化けせず保存・取得できているか
+   SELECT id, name FROM api_accounts;
+   SELECT id, device_name, device_type FROM devices WHERE device_name <> '';
+
+   -- 接続コレーションとテーブルのコレーションを確認
+   SHOW VARIABLES LIKE 'collation_connection';
+   SELECT TABLE_NAME, TABLE_COLLATION FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = DATABASE();
+   ```
+
+   日本語が化けている、または既存行の `name` / `device_name` が読めない場合は停止してユーザーに報告すること。
 
 いずれかが期待どおりでない場合は、そこで停止してユーザーに報告すること。
 
