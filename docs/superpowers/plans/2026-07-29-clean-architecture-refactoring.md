@@ -1060,7 +1060,7 @@ func TestSigner_必須項目が空でない(t *testing.T) {
 	assert.NotEmpty(t, got.Timestamp)
 }
 
-func TestSigner_nonce は毎回変わる(t *testing.T) {
+func TestSigner_nonceは毎回変わる(t *testing.T) {
 	s := newSigner()
 
 	first, err := s.sign("tok", "sec")
