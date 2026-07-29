@@ -33,9 +33,10 @@ func (s *Store) SaveAccount(ctx context.Context, a domain.Account) (domain.Accou
 	m := toAccountModel(a)
 
 	err := s.db.WithContext(ctx).
+		// updated_at を更新対象に含めない理由は SaveDevice と同じ。
 		Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "token"}},
-			DoUpdates: clause.AssignmentColumns([]string{"name", "secret", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"name", "secret"}),
 		}).
 		Create(&m).Error
 	if err != nil {
@@ -61,10 +62,15 @@ func (s *Store) SaveDevice(ctx context.Context, accountID domain.AccountID, d do
 	m := toDeviceModel(accountID, d)
 
 	err := s.db.WithContext(ctx).
+		// updated_at は更新対象に含めない。含めると毎回新しい時刻を代入することに
+		// なり、中身が変わっていなくても MySQL が「変化した行」とみなして毎分
+		// 書き込みが発生する。列定義の ON UPDATE CURRENT_TIMESTAMP に任せれば、
+		// 実際に内容が変わったときだけ更新され、updated_at も「最後に収集した
+		// 時刻」ではなく「最後に内容が変わった時刻」という本来の意味になる。
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "api_account_id"}, {Name: "device_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"device_name", "device_type", "hub_device_id", "enable_cloud_service", "updated_at",
+				"device_name", "device_type", "hub_device_id", "enable_cloud_service",
 			}),
 		}).
 		Create(&m).Error

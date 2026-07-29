@@ -123,11 +123,13 @@ func TestSaveAccount_発行するSQL(t *testing.T) {
 	assert.Equal(t,
 		"INSERT INTO `api_accounts` (`name`,`token`,`secret`,`created_at`,`updated_at`) "+
 			"VALUES (?,?,?,?,?) "+
-			"ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`secret`=VALUES(`secret`),`updated_at`=VALUES(`updated_at`)",
+			"ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`secret`=VALUES(`secret`)",
 		insert.SQL)
 
 	// 競合キーである token を更新してしまうと、別アカウントの行を書き換えうる。
 	assertNotUpdated(t, insert.SQL, "token", "token は競合キーなので更新対象に含めてはならない")
+	assertNotUpdated(t, insert.SQL, "updated_at",
+		"updated_at を代入すると中身が同じでも毎回書き込みが発生する。列定義の ON UPDATE CURRENT_TIMESTAMP に任せる")
 
 	require.Len(t, insert.Vars, 5)
 	assert.Equal(t, "メインアカウント", insert.Vars[0])
@@ -162,14 +164,18 @@ func TestSaveDevice_発行するSQL(t *testing.T) {
 			"ON DUPLICATE KEY UPDATE "+
 			"`device_name`=VALUES(`device_name`),`device_type`=VALUES(`device_type`),"+
 			"`hub_device_id`=VALUES(`hub_device_id`),"+
-			"`enable_cloud_service`=VALUES(`enable_cloud_service`),"+
-			"`updated_at`=VALUES(`updated_at`)",
+			"`enable_cloud_service`=VALUES(`enable_cloud_service`)",
 		insert.SQL)
 
 	// 移行元の repository.go も is_virtual_infrared を更新対象に含めていない。
 	// INSERT のカラム一覧には現れるため、更新句だけを取り出して検査する。
 	assertNotUpdated(t, insert.SQL, "is_virtual_infrared",
 		"is_virtual_infrared は移行元と同じく更新対象に含めない")
+	// 収集は毎分走る。updated_at を代入すると中身が同じでも MySQL が「変化した行」と
+	// みなし、全デバイスぶんの書き込みが毎分発生する。列定義の
+	// ON UPDATE CURRENT_TIMESTAMP に任せれば、内容が変わったときだけ更新される。
+	assertNotUpdated(t, insert.SQL, "updated_at",
+		"updated_at は更新対象に含めない（ON UPDATE CURRENT_TIMESTAMP に任せる）")
 	assertNotUpdated(t, insert.SQL, "api_account_id",
 		"api_account_id は競合キーなので更新対象に含めてはならない")
 	assertNotUpdated(t, insert.SQL, "device_id",
