@@ -1,15 +1,16 @@
 # switchBotStore
 
 SwitchBot APIからデバイスのステータスを収集し、MySQLに保存するデータ収集ツールです。  
-複数のSwitchBotアカウントを一括管理でき、初回起動時に全デバイスの初期データを自動取得します。  
+複数のSwitchBotアカウントを一括管理できます。  
 実行するたびに1回収集して終了するため、cron やタスクスケジューラと組み合わせて定期実行します。
 
 ## 機能
 
 - **複数アカウント対応**: 設定ファイルに複数のSwitchBot APIアカウントを登録可能
-- **テーブル自動作成**: 起動時にテーブルが存在しない場合は自動で作成
-- **初回データ収集**: 初回起動時に全デバイスのステータスを即座に取得・保存
 - **1回実行型**: 起動するたびに収集を1回行って終了する。定期実行はOSのcron/タスクスケジューラに委ねる
+- **マイグレーション**: 起動時に goose で未適用のマイグレーションを自動適用（実行ファイルに同梱）
+- **スキーマ検証**: マイグレーション後、コードが期待するテーブル・カラムが存在するかを起動時に検証
+- **構造化ログ**: JSON 形式で標準エラー出力とファイルに出力（`log_dir/YYYY-MM-DD.log`）
 
 ## テーブル設計
 
@@ -17,7 +18,6 @@ SwitchBot APIからデバイスのステータスを収集し、MySQLに保存�
 api_accounts        SwitchBot APIアカウント（tokenをユニークキーとして管理）
     └── devices     デバイス情報（アカウントごと）
         └── device_status_logs  収集ログ（JSONで保存、デバイス種別を問わず対応）
-system_settings     初回起動フラグ等のシステム設定
 ```
 
 | テーブル | 説明 |
@@ -25,11 +25,11 @@ system_settings     初回起動フラグ等のシステム設定
 | `api_accounts` | APIトークン・シークレットを管理 |
 | `devices` | デバイスID・名前・種別・クラウドサービス有効フラグ等 |
 | `device_status_logs` | 収集したステータスをJSONで保存（`recorded_at` でインデックス）|
-| `system_settings` | `initial_collect_done` フラグで初回起動を判定 |
+| `system_settings` | 現在はコードから参照されない旧テーブル（既存データ保持のため残置）|
 
 ## 動作環境
 
-- Go 1.21 以上
+- Go 1.26.3 以上
 - MySQL 5.7 以上（JSON型サポートのため）
 
 ## セットアップ
@@ -89,11 +89,13 @@ cp config.json.example config.json
 
 ```bash
 # ビルド (config.json と同じディレクトリに出力)
-go build -o switchbotstore ./cmd/
+go build ./cmd/switchbotstore/
 
 # 手動実行（1回収集して終了）
 ./switchbotstore
 ```
+
+エントリポイントが `cmd/switchbotstore/` に移ったため、バイナリ名はディレクトリ名から決まり `-o` の指定が不要になった。
 
 ### 5. 定期実行の設定
 
@@ -106,8 +108,12 @@ crontab -e
 以下を追加します（5分ごとに実行する例）。
 
 ```cron
-*/5 * * * * /path/to/switchbotstore >> /path/to/logs/cron.log 2>&1
+*/5 * * * * cd /path/to && ./switchbotstore >> /path/to/logs/cron.log 2>&1
 ```
+
+`config.json` は実行ファイルの位置ではなく**カレントワーキングディレクトリ**からの相対パスで解決されるため、`cd` で作業ディレクトリを `config.json` と同じ場所に移してから実行する。
+
+`2>&1` で標準エラー出力もリダイレクトしているのは、設定ファイルの読み込みやログ初期化に失敗した場合、ログファイルがまだ存在しないため標準エラー出力にしかエラーが出ないため（それ以降の失敗はログファイルと標準エラー出力の両方に出力される）。
 
 #### Windows（タスクスケジューラ）
 
@@ -120,14 +126,52 @@ crontab -e
 ```
 起動（cron/タスクスケジューラにより定期呼び出し）
  │
- ├─ config.json 読み込み
+ ├─ config.json 読み込み・検証
+ ├─ ログ出力先の設定
  ├─ MySQL 接続
- ├─ テーブル作成（IF NOT EXISTS）
+ ├─ マイグレーション適用（goose）
+ ├─ スキーマ検証
  │
- ├─ [初回起動の場合] 全デバイスのステータスを取得・保存 → 終了
- │
- └─ [2回目以降] アカウントごとにデバイス一覧取得 → ステータス取得 → DB保存 → 終了
+ └─ アカウントごとに
+      ├─ アカウント登録
+      ├─ デバイス一覧取得
+      └─ デバイスごとにステータス取得 → DB保存
 ```
+
+### 終了コード
+
+| コード | 条件 |
+|---|---|
+| `0` | 正常終了。デバイス1台の失敗（オフライン等）は含まれる |
+| `1` | 設定・DB接続・マイグレーションの失敗、またはアカウント単位の致命的エラー（認証失敗、デバイス一覧の取得失敗など）が1件以上 |
+
+cron やタスクスケジューラから失敗を検知できるよう、アカウント単位の失敗は終了コード 1 になる。
+
+## アーキテクチャ
+
+クリーンアーキテクチャの依存規則に従い、内側は外側を一切 import しない。
+
+```
+  infra ──────┐
+              ▼
+  adapter ──> usecase ──> domain
+     ▲                       ▲
+     └───────────────────────┘
+```
+
+| ディレクトリ | 責務 | import してよいもの |
+|---|---|---|
+| `internal/domain` | ドメインモデル | 標準ライブラリのみ |
+| `internal/usecase` | ユースケースと出力ポート。ログは吐かず結果を値で返す | `domain` のみ |
+| `internal/adapter` | SwitchBot API / GORM 永続化 / ログ整形 | `usecase`, `domain` |
+| `internal/infra` | 設定・ログ・DB接続 | 内部パッケージを import しない |
+| `cmd/switchbotstore` | コンポジションルート（配線） | すべて |
+
+DB スキーマの正は `internal/infra/mysql/migrations/*.sql`（goose）にある。
+`internal/adapter/persistence` の GORM モデルはそこへのマッピングにすぎず、
+両者のズレは起動時の `VerifySchema` が検出する。
+
+設計の詳細は `docs/superpowers/specs/2026-07-29-clean-architecture-refactoring-design.md` を参照。
 
 ## テスト実行
 
@@ -140,3 +184,4 @@ go test ./... -v
 - **クラウドサービス無効デバイス**: SwitchBotアプリでクラウドサービスを有効にしていないデバイスはステータス取得ができないためスキップされます（デバイス登録は行われます）
 - **赤外線リモコン**: SwitchBot API にステータス取得エンドポイントがないため、デバイス登録のみ行われます
 - **`config.json` は `.gitignore` 対象**: APIトークンを含むため、Gitには含まれません。`config.json.example` をコピーして使用してください
+- **赤外線リモコンの種別**: SwitchBot API は赤外線リモコンの種別を `remoteType` で返すが、本ツールは `deviceType` を読むため `devices.device_type` は空文字で保存される（現行の挙動を維持）
