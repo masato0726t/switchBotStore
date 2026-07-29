@@ -29,6 +29,10 @@ func (p *SlogPresenter) presentAccount(acc usecase.AccountResult) {
 		p.logger.Error("アカウントの収集に失敗しました",
 			"account", acc.AccountName,
 			"error", acc.Err.Error())
+		// アカウント単位の致命的エラーは、デバイスの処理を開始する前
+		// （アカウント登録またはデバイス一覧取得）にのみ発生する。
+		// したがって Err が非 nil のとき Devices は空であり、
+		// ここで return してもデバイスのログは失われない。
 		return
 	}
 
@@ -55,8 +59,15 @@ func (p *SlogPresenter) presentDevice(accountName string, dev usecase.DeviceResu
 		"outcome", dev.Outcome.String(),
 	}
 
-	if dev.Err != nil {
-		p.logger.Warn("デバイスの処理に失敗しました", append(attrs, "error", dev.Err.Error())...)
+	// ログレベルはログ行の outcome フィールドと常に一致するべき。
+	// outcome が "failed" なら WARN として、運用監視で漏れないようにする。
+	// error 属性は Err が非 nil のときだけ付ける。
+	if dev.Outcome == usecase.OutcomeFailed {
+		if dev.Err != nil {
+			p.logger.Warn("デバイスの処理に失敗しました", append(attrs, "error", dev.Err.Error())...)
+		} else {
+			p.logger.Warn("デバイスの処理に失敗しました", attrs...)
+		}
 		return
 	}
 	p.logger.Info("デバイスを処理しました", attrs...)

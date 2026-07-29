@@ -152,3 +152,32 @@ func TestPresent_空のレポートでもパニックしない(t *testing.T) {
 		p.Present(usecase.CollectReport{})
 	})
 }
+
+func TestPresent_OutcomeFailedだがエラーなしの場合もWARNで記録する(t *testing.T) {
+	var buf bytes.Buffer
+	p := presenter.NewSlog(newTestLogger(&buf))
+
+	p.Present(usecase.CollectReport{Accounts: []usecase.AccountResult{{
+		AccountName: "acc1",
+		Devices: []usecase.DeviceResult{{
+			Device:  domain.Device{ID: "d1", Name: "オフラインBot"},
+			Outcome: usecase.OutcomeFailed,
+			Err:     nil, // Err は nil だが Outcome は Failed
+		}},
+	}}})
+
+	entries := logEntries(t, &buf)
+
+	found := false
+	for _, e := range entries {
+		if e["device"] == "オフラインBot" {
+			found = true
+			assert.Equal(t, "WARN", e["level"])
+			assert.Equal(t, "failed", e["outcome"])
+			// Err が nil のため error フィールドは存在しない
+			_, hasError := e["error"]
+			assert.False(t, hasError, "error フィールドは存在しないはず")
+		}
+	}
+	assert.True(t, found, "OutcomeFailedのログが出力されていない")
+}
