@@ -20,13 +20,18 @@ type deviceListBody struct {
 
 // deviceInfo は API が返すデバイス1件の情報。
 //
-// 注意: SwitchBot API は infraredRemoteList の要素に deviceType ではなく
-// remoteType を返すため、赤外線リモコンの DeviceType は空文字になる。
-// これは現行実装から引き継いだ挙動であり、本リファクタリングでは変更しない。
+// SwitchBot API は deviceList の要素に deviceType を、infraredRemoteList の
+// 要素に remoteType を返す（名前が違うだけで、どちらもデバイスの種別）。
+// 両方を受けて mapper が種別へ畳み込む。
 type deviceInfo struct {
-	DeviceID           string `json:"deviceId"`
-	DeviceName         string `json:"deviceName"`
-	DeviceType         string `json:"deviceType"`
+	DeviceID   string `json:"deviceId"`
+	DeviceName string `json:"deviceName"`
+	DeviceType string `json:"deviceType"`
+
+	// RemoteType は赤外線リモコンの種別（"Air Conditioner" / "TV" / "Light" など）。
+	// 物理デバイスでは空になる。
+	RemoteType string `json:"remoteType"`
+
 	HubDeviceID        string `json:"hubDeviceId"`
 	EnableCloudService bool   `json:"enableCloudService"`
 }

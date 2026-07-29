@@ -21,9 +21,22 @@ func toDomainDevice(d deviceInfo, kind domain.DeviceKind) domain.Device {
 	return domain.Device{
 		ID:                  domain.DeviceID(d.DeviceID),
 		Name:                d.DeviceName,
-		Type:                d.DeviceType,
+		Type:                resolveType(d),
 		HubID:               domain.DeviceID(d.HubDeviceID),
 		Kind:                kind,
 		CloudServiceEnabled: d.EnableCloudService,
 	}
+}
+
+// resolveType はデバイスの種別を返す。
+//
+// 赤外線リモコンは deviceType ではなく remoteType に種別が入るため、
+// deviceType だけを見ていると種別が空のまま保存され、種別で絞り込む側
+// （エアコン自動制御など）が対象を見つけられなくなる。
+// deviceType を優先するのは、物理デバイスで両方が返る将来の変更に備えるため。
+func resolveType(d deviceInfo) string {
+	if d.DeviceType != "" {
+		return d.DeviceType
+	}
+	return d.RemoteType
 }
