@@ -83,7 +83,9 @@ cp config.json.example config.json
 | `accounts[].name` | アカウント識別名（任意） | 必須 |
 | `accounts[].token` | SwitchBot APIトークン | 必須 |
 | `accounts[].secret` | SwitchBot APIシークレット | 必須 |
-| `log_dir` | ログ出力ディレクトリ | `logs` |
+| `log_dir` | ログ出力ディレクトリ | 未指定（デフォルト値なし） |
+
+`log_dir` を指定しない場合、または指定先への書き込みに失敗した場合は、標準エラー出力のみにログを出力し、ログファイルは作成しません。
 
 ### 4. ビルドと実行
 

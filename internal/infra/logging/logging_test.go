@@ -72,17 +72,11 @@ func TestSetup_既存ファイルに追記する(t *testing.T) {
 	assert.Contains(t, string(content), "追記した行")
 }
 
-func TestSetup_logDirが空ならファイルを作らない(t *testing.T) {
-	dir := t.TempDir()
-
+func TestSetup_logDirが空なら標準エラー出力のみを使う(t *testing.T) {
 	logger, closeFn, err := logging.Setup("", testNow)
 	require.NoError(t, err)
 	require.NotNil(t, logger)
-	require.NoError(t, closeFn())
-
-	entries, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	assert.Empty(t, entries)
+	assert.NoError(t, closeFn())
 }
 
 func TestSetup_closeを二重に呼んでもパニックしない(t *testing.T) {

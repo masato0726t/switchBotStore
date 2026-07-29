@@ -10,6 +10,7 @@ config.json
 *.test
 *.out
 /switchBotStore
+/switchbotstore
 
 # Go モジュールキャッシュ・ワークスペース
 /vendor/

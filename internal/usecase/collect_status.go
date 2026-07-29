@@ -83,7 +83,7 @@ func (uc *CollectStatus) collectDevice(
 
 	snapshot := domain.StatusSnapshot{Payload: payload, RecordedAt: recordedAt}
 	if err := uc.repo.AppendStatus(ctx, recordID, snapshot); err != nil {
-		return failed(dev, fmt.Errorf("ステータスログの保存に失敗しました: %w", err))
+		return failed(dev, fmt.Errorf("ステータスの保存に失敗しました: %w", err))
 	}
 
 	return DeviceResult{Device: dev, Outcome: OutcomeStored}

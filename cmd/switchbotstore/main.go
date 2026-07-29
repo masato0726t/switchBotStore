@@ -56,7 +56,12 @@ func run() (retErr error) {
 
 	logger, closeLog, err := logging.Setup(cfg.LogDir, time.Now())
 	if err != nil {
-		return fmt.Errorf("ログの初期化に失敗しました: %w", err)
+		// ログ出力先の不備でデータ収集を止めない（このツールの一次目的は収集であり、
+		// 旧実装も標準出力のみに切り替えて続行していた）。
+		logger = logging.New(os.Stderr)
+		closeLog = func() error { return nil }
+		logger.Warn("ログファイルの初期化に失敗しました。標準エラー出力のみに記録します",
+			"log_dir", cfg.LogDir, "error", err.Error())
 	}
 	defer func() {
 		if err := closeLog(); err != nil {
@@ -93,7 +98,7 @@ func run() (retErr error) {
 	logger.Info("データベースに接続しました", "database", cfg.Database.Name)
 
 	if err := mysql.Migrate(ctx, db); err != nil {
-		return fmt.Errorf("マイグレーションに失敗しました: %w", err)
+		return fmt.Errorf("スキーマの適用に失敗しました: %w", err)
 	}
 	if err := persistence.VerifySchema(db); err != nil {
 		return fmt.Errorf("スキーマの検証に失敗しました: %w", err)
