@@ -846,7 +846,7 @@ func TestFatalError_複数アカウントのエラーを全件保持する(t *te
 	assert.ErrorIs(t, joined, err2, "最後の1件だけでなく全件が保持される")
 }
 
-func TestFatalError_エラーがなければ nil を返す(t *testing.T) {
+func TestFatalError_エラーがなければnilを返す(t *testing.T) {
 	report := usecase.CollectReport{Accounts: []usecase.AccountResult{{AccountName: "a1"}}}
 	assert.NoError(t, report.FatalError())
 }
@@ -969,7 +969,7 @@ func skipOutcome(dev domain.Device) Outcome {
 - [ ] **Step 6: テストが通ることを確認する**
 
 Run: `go test ./internal/usecase/ -v`
-Expected: 13個のテストがすべて PASS
+Expected: 12個のテストがすべて PASS
 
 - [ ] **Step 7: 依存規則を確認する**
 
