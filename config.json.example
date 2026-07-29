@@ -18,5 +18,6 @@
       "secret": "your_switchbot_secret_2"
     }
   ],
-  "log_dir": "logs"
+  "log_dir": "logs",
+  "log_level": "info"
 }
