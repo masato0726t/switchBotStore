@@ -85,7 +85,17 @@ func (c *Collector) InitialCollect() error {
 | ログ | `log/slog`（Go 標準・追加依存なし） | 構造化ログ。`logger.go` 106行 → 約25行 |
 | エラー集約 | `errors.Join`（Go 標準） | 部分失敗を全件保持 |
 
-`go.mod` の `go` ディレクティブは、上記ライブラリが要求する最低バージョンに合わせて更新する（実装時に実際の要求値を確認して確定する。現在は `go 1.21`、インストール済みは Go 1.26.3）。
+### バージョン（実測で確定済み）
+
+| モジュール | 採用バージョン | 要求 Go バージョン |
+|---|---|---|
+| `gorm.io/gorm` | v1.31.2 | 1.18 |
+| `gorm.io/driver/mysql` | v1.6.0 | 1.18 |
+| `github.com/pressly/goose/v3` | v3.27.3 | **1.25.7** |
+| `github.com/go-playground/validator/v10` | v10.30.3 | **1.25.0** |
+| `github.com/stretchr/testify` | v1.11.1 | 1.17 |
+
+`go.mod` の `go` ディレクティブは **`go 1.26.3`**（インストール済みの最新版）に更新する。goose が要求する 1.25.7 を上回るため要件を満たす。README の「動作環境: Go 1.21 以上」も `Go 1.26.3 以上` に更新する。
 
 ### 採用しなかったもの と その理由
 
@@ -113,8 +123,7 @@ switchBotStore/
 │   ├── domain/                         # 【最内層】標準ライブラリのみに依存
 │   │   ├── account.go                  #   Account, AccountID, Credential
 │   │   ├── device.go                   #   Device, DeviceID, DeviceRecordID, DeviceKind
-│   │   ├── status.go                   #   StatusPayload, StatusSnapshot
-│   │   └── errors.go                   #   ドメインエラー
+│   │   └── status.go                   #   StatusPayload, StatusSnapshot
 │   ├── usecase/                        # 【ユースケース層】domain のみに依存
 │   │   ├── port.go                     #   出力ポート（インターフェース定義）
 │   │   ├── collect_status.go           #   ステータス収集ユースケース
@@ -226,6 +235,8 @@ type StatusSnapshot struct {
 
 これにより問題 1.6-e（boolean trap）が解消し、`collector.go:64` に埋もれていた「クラウド無効ならスキップ」という判断がドメインの言葉として表現される。
 
+> **`domain/errors.go` は作らない**: 当初はドメインエラーの定義ファイルを置く想定だったが、ユースケースが `StatusReadable()` で事前に分岐するため、`ErrStatusNotReadable` のようなエラー値を返す経路が存在しない。消費者のいないエラー変数を置くのは本仕様書自身の YAGNI 方針に反するため、必要になった時点で追加する。
+
 ### 4.2 `usecase` の出力ポート
 
 ```go
@@ -233,17 +244,16 @@ type DeviceGateway interface {
     ListDevices(ctx context.Context, cred domain.Credential) ([]domain.Device, error)
     FetchStatus(ctx context.Context, cred domain.Credential, id domain.DeviceID) (domain.StatusPayload, error)
 }
-type AccountStore interface {
-    Save(ctx context.Context, a domain.Account) (domain.AccountID, error)
-}
-type DeviceStore interface {
-    Save(ctx context.Context, accountID domain.AccountID, d domain.Device) (domain.DeviceRecordID, error)
-}
-type StatusStore interface {
-    Append(ctx context.Context, id domain.DeviceRecordID, s domain.StatusSnapshot) error
+// Repository は収集結果の永続化を抽象化する出力ポート。
+type Repository interface {
+    SaveAccount(ctx context.Context, a domain.Account) (domain.AccountID, error)
+    SaveDevice(ctx context.Context, accountID domain.AccountID, d domain.Device) (domain.DeviceRecordID, error)
+    AppendStatus(ctx context.Context, id domain.DeviceRecordID, s domain.StatusSnapshot) error
 }
 type Clock interface{ Now() time.Time }
 ```
+
+> **設計時からの変更点**: 当初は `AccountStore` / `DeviceStore` / `StatusStore` の3インターフェースに分け、いずれも `Save` という名前にする想定だった。しかし **Go はメソッドのオーバーロードを許さない**ため、1つの実装型（`persistence.Store`）が `Save` を2つ持つことができない。実装型を3つに分ける案もあるが、単一のユースケースが3つ全てを使う以上、配線が増えるだけで得るものがない。メソッド名を `SaveAccount` / `SaveDevice` / `AppendStatus` と区別した**単一の `Repository` ポート**に統合する。
 
 `Clock` の本番実装は `time.Now()` を返すだけの3行なので、専用パッケージを作らず `cmd/switchbotstore/main.go` に非公開型として置く。テストでは固定時刻を返すフェイクを注入する。
 
