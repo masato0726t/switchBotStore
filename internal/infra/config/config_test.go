@@ -64,23 +64,23 @@ func TestLoad_検証エラーになるケース(t *testing.T) {
 		content string
 	}{
 		{
-			name: "accounts が空配列",
+			name:    "accounts が空配列",
 			content: `{"database":{"host":"h"},"accounts":[]}`,
 		},
 		{
-			name: "accounts が未指定",
+			name:    "accounts が未指定",
 			content: `{"database":{"host":"h"}}`,
 		},
 		{
-			name: "token が空",
+			name:    "token が空",
 			content: `{"database":{"host":"h"},"accounts":[{"name":"a","token":"","secret":"s"}]}`,
 		},
 		{
-			name: "secret が空",
+			name:    "secret が空",
 			content: `{"database":{"host":"h"},"accounts":[{"name":"a","token":"t","secret":""}]}`,
 		},
 		{
-			name: "database.host が空",
+			name:    "database.host が空",
 			content: `{"database":{"host":""},"accounts":[{"name":"a","token":"t","secret":"s"}]}`,
 		},
 	}

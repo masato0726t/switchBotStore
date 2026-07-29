@@ -22,7 +22,9 @@ import (
 	"switchBotStore/internal/usecase"
 )
 
-// configPath は設定ファイルのパス。実行ファイルと同じディレクトリに置く。
+// configPath は設定ファイルのパス。カレントディレクトリからの相対パスで解決される
+// (実行ファイルの位置ではない)。cron やタスクスケジューラから起動する場合は、
+// 作業ディレクトリを実行ファイルと同じ場所に設定すること。
 const configPath = "config.json"
 
 // systemClock は usecase.Clock の本番実装。
@@ -43,7 +45,7 @@ func main() {
 //
 // main から defer が確実に実行されるよう、処理は必ずこの関数に置く
 // (log.Fatalf や os.Exit を途中で呼ぶと defer が飛ばされる)。
-func run() error {
+func run() (retErr error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -59,6 +61,13 @@ func run() error {
 	defer func() {
 		if err := closeLog(); err != nil {
 			slog.Error("ログファイルのクローズに失敗しました", "error", err)
+		}
+	}()
+	// ログファイルが閉じられる前に失敗理由を記録する。
+	// defer は LIFO で実行されるため、この defer は上の closeLog より先に走る。
+	defer func() {
+		if retErr != nil {
+			logger.Error("実行に失敗しました", "error", retErr.Error())
 		}
 	}()
 
