@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func writeConfigFile(t *testing.T, content string) string {
@@ -29,21 +32,11 @@ func TestLoad_ValidConfig(t *testing.T) {
 	}`)
 
 	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("エラーが発生しない想定: %v", err)
-	}
-	if cfg.Database.Host != "localhost" {
-		t.Errorf("Database.Host = %q, want %q", cfg.Database.Host, "localhost")
-	}
-	if cfg.Database.Port != 3306 {
-		t.Errorf("Database.Port = %d, want 3306", cfg.Database.Port)
-	}
-	if len(cfg.Accounts) != 2 {
-		t.Fatalf("len(Accounts) = %d, want 2", len(cfg.Accounts))
-	}
-	if cfg.Accounts[0].Token != "tok1" {
-		t.Errorf("Accounts[0].Token = %q, want %q", cfg.Accounts[0].Token, "tok1")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "localhost", cfg.Database.Host)
+	assert.Equal(t, 3306, cfg.Database.Port)
+	require.Len(t, cfg.Accounts, 2)
+	assert.Equal(t, "tok1", cfg.Accounts[0].Token)
 }
 
 func TestLoad_DefaultPort(t *testing.T) {
@@ -53,27 +46,19 @@ func TestLoad_DefaultPort(t *testing.T) {
 	}`)
 
 	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("エラーが発生しない想定: %v", err)
-	}
-	if cfg.Database.Port != 3306 {
-		t.Errorf("デフォルト値 Database.Port = %d, want 3306", cfg.Database.Port)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 3306, cfg.Database.Port)
 }
 
 func TestLoad_FileNotFound(t *testing.T) {
 	_, err := Load(filepath.Join(t.TempDir(), "notexist.json"))
-	if err == nil {
-		t.Error("ファイルが存在しない場合はエラーを返す想定")
-	}
+	require.Error(t, err)
 }
 
 func TestLoad_InvalidJSON(t *testing.T) {
 	path := writeConfigFile(t, `{invalid json}`)
 	_, err := Load(path)
-	if err == nil {
-		t.Error("不正なJSONの場合はエラーを返す想定")
-	}
+	require.Error(t, err)
 }
 
 func TestLoad_NoAccounts(t *testing.T) {
@@ -82,9 +67,7 @@ func TestLoad_NoAccounts(t *testing.T) {
 		"accounts": []
 	}`)
 	_, err := Load(path)
-	if err == nil {
-		t.Error("accounts が空の場合はエラーを返す想定")
-	}
+	require.Error(t, err)
 }
 
 func TestLoad_MissingToken(t *testing.T) {
@@ -93,9 +76,7 @@ func TestLoad_MissingToken(t *testing.T) {
 		"accounts": [{"name": "acc", "token": "", "secret": "sec"}]
 	}`)
 	_, err := Load(path)
-	if err == nil {
-		t.Error("token が空の場合はエラーを返す想定")
-	}
+	require.Error(t, err)
 }
 
 func TestLoad_MissingSecret(t *testing.T) {
@@ -104,9 +85,7 @@ func TestLoad_MissingSecret(t *testing.T) {
 		"accounts": [{"name": "acc", "token": "tok", "secret": ""}]
 	}`)
 	_, err := Load(path)
-	if err == nil {
-		t.Error("secret が空の場合はエラーを返す想定")
-	}
+	require.Error(t, err)
 }
 
 func TestLoad_MissingDBHost(t *testing.T) {
@@ -115,9 +94,7 @@ func TestLoad_MissingDBHost(t *testing.T) {
 		"accounts": [{"name": "acc", "token": "tok", "secret": "sec"}]
 	}`)
 	_, err := Load(path)
-	if err == nil {
-		t.Error("database.host が空の場合はエラーを返す想定")
-	}
+	require.Error(t, err)
 }
 
 func TestLoad_MultipleAccounts(t *testing.T) {
@@ -131,10 +108,6 @@ func TestLoad_MultipleAccounts(t *testing.T) {
 	}`)
 
 	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("エラーが発生しない想定: %v", err)
-	}
-	if len(cfg.Accounts) != 3 {
-		t.Errorf("len(Accounts) = %d, want 3", len(cfg.Accounts))
-	}
+	require.NoError(t, err)
+	require.Len(t, cfg.Accounts, 3)
 }

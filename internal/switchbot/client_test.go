@@ -10,6 +10,9 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestClient(t *testing.T, token, secret, name string) *SwitchBotClient {
@@ -19,16 +22,12 @@ func newTestClient(t *testing.T, token, secret, name string) *SwitchBotClient {
 
 func TestAccountName(t *testing.T) {
 	c := newTestClient(t, "tok", "sec", "myAccount")
-	if c.AccountName() != "myAccount" {
-		t.Errorf("AccountName() = %q, want %q", c.AccountName(), "myAccount")
-	}
+	assert.Equal(t, "myAccount", c.AccountName())
 }
 
 func TestAccountToken(t *testing.T) {
 	c := newTestClient(t, "mytoken", "sec", "acc")
-	if c.AccountToken() != "mytoken" {
-		t.Errorf("AccountToken() = %q, want %q", c.AccountToken(), "mytoken")
-	}
+	assert.Equal(t, "mytoken", c.AccountToken())
 }
 
 func TestBuildHeadersWithNonce_RequiredFields(t *testing.T) {
@@ -36,14 +35,10 @@ func TestBuildHeadersWithNonce_RequiredFields(t *testing.T) {
 	c.nowFunc = func() time.Time { return time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC) }
 
 	headers, err := c.buildHeadersWithNonce("test-nonce-123")
-	if err != nil {
-		t.Fatalf("エラーが発生しない想定: %v", err)
-	}
+	require.NoError(t, err)
 
 	for _, key := range []string{"Authorization", "sign", "nonce", "t", "Content-Type"} {
-		if headers[key] == "" {
-			t.Errorf("ヘッダー %q が空です", key)
-		}
+		assert.NotEmpty(t, headers[key], "ヘッダー %q が空です", key)
 	}
 }
 
@@ -52,12 +47,8 @@ func TestBuildHeadersWithNonce_Authorization(t *testing.T) {
 	c.nowFunc = func() time.Time { return time.Unix(0, 0) }
 
 	headers, err := c.buildHeadersWithNonce("nonce")
-	if err != nil {
-		t.Fatalf("エラーが発生しない想定: %v", err)
-	}
-	if headers["Authorization"] != "mytoken" {
-		t.Errorf("Authorization = %q, want %q", headers["Authorization"], "mytoken")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "mytoken", headers["Authorization"])
 }
 
 func TestBuildHeadersWithNonce_Timestamp(t *testing.T) {
@@ -66,14 +57,10 @@ func TestBuildHeadersWithNonce_Timestamp(t *testing.T) {
 	c.nowFunc = func() time.Time { return fixedTime }
 
 	headers, err := c.buildHeadersWithNonce("nonce")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	expectedT := strconv.FormatInt(fixedTime.UnixMilli(), 10)
-	if headers["t"] != expectedT {
-		t.Errorf("t = %q, want %q", headers["t"], expectedT)
-	}
+	assert.Equal(t, expectedT, headers["t"])
 }
 
 func TestBuildHeadersWithNonce_SignatureIsValid(t *testing.T) {
@@ -84,18 +71,14 @@ func TestBuildHeadersWithNonce_SignatureIsValid(t *testing.T) {
 	c.nowFunc = func() time.Time { return fixedTime }
 
 	headers, err := c.buildHeadersWithNonce(nonce)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	ts := strconv.FormatInt(fixedTime.UnixMilli(), 10)
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(token + ts + nonce))
 	expectedSign := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 
-	if headers["sign"] != expectedSign {
-		t.Errorf("sign = %q, want %q", headers["sign"], expectedSign)
-	}
+	assert.Equal(t, expectedSign, headers["sign"])
 }
 
 func TestGetDevices_Success(t *testing.T) {
@@ -129,18 +112,10 @@ func TestGetDevices_Success(t *testing.T) {
 	c.apiBase = srv.URL
 
 	list, err := c.GetDevices()
-	if err != nil {
-		t.Fatalf("エラーが発生しない想定: %v", err)
-	}
-	if len(list.DeviceList) != 2 {
-		t.Errorf("len(DeviceList) = %d, want 2", len(list.DeviceList))
-	}
-	if list.DeviceList[0].DeviceID != "d1" {
-		t.Errorf("DeviceList[0].DeviceID = %q, want %q", list.DeviceList[0].DeviceID, "d1")
-	}
-	if len(list.InfraredRemoteList) != 1 {
-		t.Errorf("len(InfraredRemoteList) = %d, want 1", len(list.InfraredRemoteList))
-	}
+	require.NoError(t, err)
+	require.Len(t, list.DeviceList, 2)
+	assert.Equal(t, "d1", list.DeviceList[0].DeviceID)
+	assert.Len(t, list.InfraredRemoteList, 1)
 }
 
 func TestGetDevices_APIError(t *testing.T) {
@@ -153,9 +128,7 @@ func TestGetDevices_APIError(t *testing.T) {
 	c.apiBase = srv.URL
 
 	_, err := c.GetDevices()
-	if err == nil {
-		t.Error("APIエラーの場合はエラーを返す想定")
-	}
+	require.Error(t, err)
 }
 
 func TestGetDevices_NetworkError(t *testing.T) {
@@ -163,9 +136,7 @@ func TestGetDevices_NetworkError(t *testing.T) {
 	c.apiBase = "http://127.0.0.1:1"
 
 	_, err := c.GetDevices()
-	if err == nil {
-		t.Error("ネットワークエラーの場合はエラーを返す想定")
-	}
+	require.Error(t, err)
 }
 
 func TestGetDeviceStatus_Success(t *testing.T) {
@@ -185,17 +156,12 @@ func TestGetDeviceStatus_Success(t *testing.T) {
 	c.apiBase = srv.URL
 
 	raw, err := c.GetDeviceStatus("d1")
-	if err != nil {
-		t.Fatalf("エラーが発生しない想定: %v", err)
-	}
+	require.NoError(t, err)
 
 	var body map[string]interface{}
-	if err := json.Unmarshal(raw, &body); err != nil {
-		t.Fatalf("JSONパース失敗: %v", err)
-	}
-	if body["deviceId"] != "d1" {
-		t.Errorf("deviceId = %v, want %q", body["deviceId"], "d1")
-	}
+	err = json.Unmarshal(raw, &body)
+	require.NoError(t, err)
+	assert.Equal(t, "d1", body["deviceId"])
 }
 
 func TestGetDeviceStatus_APIError(t *testing.T) {
@@ -208,7 +174,5 @@ func TestGetDeviceStatus_APIError(t *testing.T) {
 	c.apiBase = srv.URL
 
 	_, err := c.GetDeviceStatus("unknown")
-	if err == nil {
-		t.Error("APIエラーの場合はエラーを返す想定")
-	}
+	require.Error(t, err)
 }
