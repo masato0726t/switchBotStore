@@ -54,11 +54,11 @@ func run() (retErr error) {
 		return fmt.Errorf("設定の読み込みに失敗しました: %w", err)
 	}
 
-	logger, closeLog, err := logging.Setup(cfg.LogDir, time.Now())
+	logger, closeLog, err := logging.Setup(cfg.LogDir, cfg.LogLevel, time.Now())
 	if err != nil {
 		// ログ出力先の不備でデータ収集を止めない（このツールの一次目的は収集であり、
 		// 旧実装も標準出力のみに切り替えて続行していた）。
-		logger = logging.New(os.Stderr)
+		logger = logging.New(os.Stderr, cfg.LogLevel)
 		closeLog = func() error { return nil }
 		logger.Warn("ログファイルの初期化に失敗しました。標準エラー出力のみに記録します",
 			"log_dir", cfg.LogDir, "error", err.Error())

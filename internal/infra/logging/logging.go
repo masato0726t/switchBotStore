@@ -11,21 +11,26 @@ import (
 )
 
 // New は w へ JSON 形式で書き出す slog.Logger を返す。
-func New(w io.Writer) *slog.Logger {
-	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo}))
+//
+// level 未満のレベルのログは出力されない。
+func New(w io.Writer, level slog.Level) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level}))
 }
 
 // Setup は logDir に「YYYY-MM-DD.log」を開き、標準エラー出力とファイルの
 // 両方へ JSON 形式で出力する slog.Logger を返す。
+//
+// level 未満のレベルのログは、標準エラー出力とファイルの両方で出力されない。
+// ハンドラは1つなので出力先ごとにレベルを分けることはできない。
 //
 // logDir が空の場合は標準エラー出力のみに出力し、ファイルは作らない。
 // 戻り値の closeFn はプロセス終了時に必ず呼ぶこと（複数回呼んでも安全）。
 //
 // 本アプリは cron から起動されて数秒で終了するため、実行中のローテーションは
 // 行わない。日付をファイル名にすることで日次分割が達成される。
-func Setup(logDir string, now time.Time) (logger *slog.Logger, closeFn func() error, err error) {
+func Setup(logDir string, level slog.Level, now time.Time) (logger *slog.Logger, closeFn func() error, err error) {
 	if logDir == "" {
-		return New(os.Stderr), func() error { return nil }, nil
+		return New(os.Stderr, level), func() error { return nil }, nil
 	}
 
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
@@ -47,5 +52,5 @@ func Setup(logDir string, now time.Time) (logger *slog.Logger, closeFn func() er
 		return f.Close()
 	}
 
-	return New(io.MultiWriter(os.Stderr, f)), closeFn, nil
+	return New(io.MultiWriter(os.Stderr, f), level), closeFn, nil
 }
