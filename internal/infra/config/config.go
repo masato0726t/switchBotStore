@@ -4,6 +4,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/go-playground/validator/v10"
@@ -14,9 +15,10 @@ const DefaultPort = 3306
 
 // Config は config.json の内容。
 type Config struct {
-	Database Database  `json:"database"`
-	Accounts []Account `json:"accounts" validate:"required,min=1,dive"`
-	LogDir   string    `json:"log_dir"`
+	Database Database   `json:"database"`
+	Accounts []Account  `json:"accounts" validate:"required,min=1,dive"`
+	LogDir   string     `json:"log_dir"`
+	LogLevel slog.Level `json:"log_level"`
 }
 
 // Database は MySQL への接続情報。

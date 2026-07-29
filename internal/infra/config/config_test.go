@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -120,4 +121,66 @@ func TestLoad_複数アカウントを読み込む(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, cfg.Accounts, 2)
 	assert.Equal(t, "t2", cfg.Accounts[1].Token)
+}
+
+func TestLoad_ログレベルを読み込む(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  slog.Level
+	}{
+		{name: "debug", value: `"debug"`, want: slog.LevelDebug},
+		{name: "info", value: `"info"`, want: slog.LevelInfo},
+		{name: "warn", value: `"warn"`, want: slog.LevelWarn},
+		{name: "error", value: `"error"`, want: slog.LevelError},
+		{name: "大文字でも通る", value: `"WARN"`, want: slog.LevelWarn},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := config.Load(writeConfig(t, `{
+			  "database": {"host":"h"},
+			  "accounts": [{"token":"t","secret":"s"}],
+			  "log_level": `+tt.value+`
+			}`))
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.LogLevel)
+		})
+	}
+}
+
+func TestLoad_ログレベル未指定ならINFO(t *testing.T) {
+	// 既存の config.json は log_level を持たない。現行と同じ振る舞いを保つため、
+	// 未指定時は INFO でなければならない。
+	cfg, err := config.Load(writeConfig(t, `{
+	  "database": {"host":"h"},
+	  "accounts": [{"token":"t","secret":"s"}]
+	}`))
+
+	require.NoError(t, err)
+	assert.Equal(t, slog.LevelInfo, cfg.LogLevel)
+}
+
+func TestLoad_不正なログレベルでエラー(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{name: "存在しない名前", value: `"WARNING"`},
+		{name: "タイポ", value: `"inof"`},
+		{name: "空文字", value: `""`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Load(writeConfig(t, `{
+			  "database": {"host":"h"},
+			  "accounts": [{"token":"t","secret":"s"}],
+			  "log_level": `+tt.value+`
+			}`))
+
+			require.Error(t, err)
+		})
+	}
 }
