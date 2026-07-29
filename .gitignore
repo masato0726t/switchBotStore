@@ -33,3 +33,6 @@ Desktop.ini
 # ログファイル
 *.log
 /logs/
+
+# 作業用のスクラッチ領域（設計・計画は docs/ 配下に残す）
+/.superpowers/
