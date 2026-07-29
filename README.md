@@ -193,4 +193,4 @@ go test ./... -v
 - **クラウドサービス無効デバイス**: SwitchBotアプリでクラウドサービスを有効にしていないデバイスはステータス取得ができないためスキップされます（デバイス登録は行われます）
 - **赤外線リモコン**: SwitchBot API にステータス取得エンドポイントがないため、デバイス登録のみ行われます
 - **`config.json` は `.gitignore` 対象**: APIトークンを含むため、Gitには含まれません。`config.json.example` をコピーして使用してください
-- **赤外線リモコンの種別**: SwitchBot API は赤外線リモコンの種別を `remoteType` で返しますが、本ツールは `deviceType` を読むため `devices.device_type` は空文字で保存されます（現行の挙動を維持）
+- **デバイス種別の保存**: SwitchBot API は物理デバイスの種別を `deviceType`、赤外線リモコンの種別を `remoteType` で返します。本ツールは両方を読んで `devices.device_type` に保存します（`Air Conditioner` / `DIY Light` など）
