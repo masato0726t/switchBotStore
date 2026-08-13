@@ -29,8 +29,12 @@ func New(w io.Writer, level slog.Level) *slog.Logger {
 // 本アプリは cron から起動されて数秒で終了するため、実行中のローテーションは
 // 行わない。日付をファイル名にすることで日次分割が達成される。
 func Setup(logDir string, level slog.Level, now time.Time) (logger *slog.Logger, closeFn func() error, err error) {
+	// ログ規約v1（2026-08-13）：stderr へは syslog priority プレフィックス付きで書く。
+	// ファイル側には付けない（journald 以外が読むと "<3>" がノイズになるため）。
+	stderr := NewJournaldWriter(os.Stderr)
+
 	if logDir == "" {
-		return New(os.Stderr, level), func() error { return nil }, nil
+		return New(stderr, level), func() error { return nil }, nil
 	}
 
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
@@ -52,5 +56,5 @@ func Setup(logDir string, level slog.Level, now time.Time) (logger *slog.Logger,
 		return f.Close()
 	}
 
-	return New(io.MultiWriter(os.Stderr, f), level), closeFn, nil
+	return New(io.MultiWriter(stderr, f), level), closeFn, nil
 }
