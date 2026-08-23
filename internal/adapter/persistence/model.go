@@ -9,12 +9,15 @@ import "time"
 
 // apiAccountModel は api_accounts テーブルの1行。
 type apiAccountModel struct {
-	ID        int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	Name      string    `gorm:"column:name"`
-	Token     string    `gorm:"column:token"`
-	Secret    string    `gorm:"column:secret"`
-	CreatedAt time.Time `gorm:"column:created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at"`
+	ID     int64  `gorm:"column:id;primaryKey;autoIncrement"`
+	Name   string `gorm:"column:name"`
+	Token  string `gorm:"column:token"`
+	Secret string `gorm:"column:secret"`
+	// DevicesSyncedAt はデバイス一覧を API から最後に取得した日時。
+	// 一度も取得していない行では NULL になるためポインタで受ける。
+	DevicesSyncedAt *time.Time `gorm:"column:devices_synced_at"`
+	CreatedAt       time.Time  `gorm:"column:created_at"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at"`
 }
 
 // TableName は GORM が使うテーブル名を返す。

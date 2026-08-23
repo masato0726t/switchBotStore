@@ -17,7 +17,7 @@ func TestExpectedSchema_モデルからテーブル名とカラム名を導出�
 			model:     apiAccountModel{},
 			wantTable: "api_accounts",
 			wantColumns: []string{
-				"id", "name", "token", "secret", "created_at", "updated_at",
+				"id", "name", "token", "secret", "devices_synced_at", "created_at", "updated_at",
 			},
 		},
 		{

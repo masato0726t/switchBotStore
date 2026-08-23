@@ -69,7 +69,8 @@ cp config.json.example config.json
       "secret": "your_switchbot_secret"
     }
   ],
-  "log_dir": "logs"
+  "log_dir": "logs",
+  "device_list_cache_ttl": "24h"
 }
 ```
 
@@ -85,6 +86,19 @@ cp config.json.example config.json
 | `accounts[].secret` | SwitchBot APIシークレット | 必須 |
 | `log_dir` | ログ出力ディレクトリ | 未指定（デフォルト値なし） |
 | `log_level` | 出力するログの下限レベル。`debug` / `info` / `warn` / `error` のいずれか（大文字小文字は問いません） | 未指定（`info` 相当） |
+| `device_list_cache_ttl` | デバイス一覧を API から取り直す間隔（`time.ParseDuration` の書式。例 `24h` / `30m`）。`"0"` でキャッシュを使わない | `24h` |
+
+#### デバイス一覧のキャッシュ
+
+1回の実行で消費する SwitchBot API の呼び出しは「デバイス一覧 1回 + ステータス取得（対象デバイス数）回」です。デバイス構成はめったに変わらないため、一度取得した一覧は `devices` テーブルに残っているものを再利用し、`device_list_cache_ttl` を過ぎたときだけ API から取り直します。1分間隔で実行する場合、`/v1.1/devices` の呼び出しは 1,440回/日 から 1回/日 まで減ります。
+
+キャッシュを使った実行では `devices` テーブルへの登録もやり直しません。デバイスを追加・改名した直後に反映させたい場合は、期限を待たずに次のコマンドで取り直せます。
+
+```bash
+./switchbotstore -refresh-devices
+```
+
+一覧を API から取り直した実行のうち、全デバイスを `devices` へ登録できたときだけ同期時刻（`api_accounts.devices_synced_at`）を進めます。1台でも登録に失敗した場合は時刻を据え置き、次回もう一度 API から取り直します。
 
 `log_dir` を指定しない場合、または指定先への書き込みに失敗した場合は、標準エラー出力のみにログを出力し、ログファイルは作成しません。
 

@@ -23,10 +23,25 @@ type DeviceGateway interface {
 	FetchStatus(ctx context.Context, cred domain.Credential, id domain.DeviceID) (domain.StatusPayload, error)
 }
 
+// DeviceRecord は永続化済みのデバイスと、その devices.id の対。
+//
+// ID がゼロ値のときは「まだ devices へ登録していない」ことを表す。
+type DeviceRecord struct {
+	ID     domain.DeviceRecordID
+	Device domain.Device
+}
+
 // Repository は収集結果の永続化を抽象化する出力ポート。
 type Repository interface {
 	// SaveAccount はアカウントを登録し、既に存在する場合は更新して ID を返す。
 	SaveAccount(ctx context.Context, a domain.Account) (domain.AccountID, error)
+
+	// LoadDeviceCache は accountID に登録済みのデバイスと、その一覧を API から
+	// 最後に取得した日時を返す。一度も取得していなければ syncedAt はゼロ値。
+	LoadDeviceCache(ctx context.Context, accountID domain.AccountID) (devices []DeviceRecord, syncedAt time.Time, err error)
+
+	// MarkDevicesSynced はデバイス一覧を API から取得した日時を記録する。
+	MarkDevicesSynced(ctx context.Context, accountID domain.AccountID, at time.Time) error
 
 	// SaveDevice はデバイスを登録し、既に存在する場合は更新して ID を返す。
 	SaveDevice(ctx context.Context, accountID domain.AccountID, d domain.Device) (domain.DeviceRecordID, error)

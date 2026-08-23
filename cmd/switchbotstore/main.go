@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -46,6 +47,11 @@ func main() {
 // main から defer が確実に実行されるよう、処理は必ずこの関数に置く
 // (log.Fatalf や os.Exit を途中で呼ぶと defer が飛ばされる)。
 func run() (retErr error) {
+	// デバイス構成を変えた直後に、キャッシュの期限を待たず反映させるための逃げ道。
+	refreshDevices := flag.Bool("refresh-devices", false,
+		"デバイス一覧のキャッシュを無視して、この実行では必ず API から取り直す")
+	flag.Parse()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -76,9 +82,15 @@ func run() (retErr error) {
 		}
 	}()
 
+	deviceCacheTTL := cfg.DeviceCacheTTL()
+	if *refreshDevices {
+		deviceCacheTTL = 0
+	}
+
 	logger.Info("設定を読み込みました",
 		"accounts", len(cfg.Accounts),
-		"log_dir", cfg.LogDir)
+		"log_dir", cfg.LogDir,
+		"device_list_cache_ttl", deviceCacheTTL.String())
 
 	db, closeDB, err := mysql.Connect(ctx, mysql.Config{
 		Host:     cfg.Database.Host,
@@ -109,6 +121,7 @@ func run() (retErr error) {
 		switchbot.NewGateway(),
 		persistence.New(db),
 		systemClock{},
+		deviceCacheTTL,
 	)
 
 	logger.Info("データ収集を開始します")

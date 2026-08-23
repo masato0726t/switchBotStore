@@ -19,5 +19,6 @@
     }
   ],
   "log_dir": "logs",
-  "log_level": "info"
+  "log_level": "info",
+  "device_list_cache_ttl": "24h"
 }
