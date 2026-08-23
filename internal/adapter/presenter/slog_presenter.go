@@ -50,13 +50,21 @@ func (p *SlogPresenter) presentAccount(acc usecase.AccountResult) {
 	}
 
 	counts := tally(acc.Devices)
-	p.logger.Info("アカウントの収集が完了しました",
+	attrs := []any{
 		"account", acc.AccountName,
 		"total", len(acc.Devices),
 		"stored", counts[usecase.OutcomeStored],
 		"skipped", counts[usecase.OutcomeSkippedCloudDisabled],
 		"registered_only", counts[usecase.OutcomeRegisteredOnly],
-		"failed", counts[usecase.OutcomeFailed])
+		"failed", counts[usecase.OutcomeFailed],
+	}
+	// 上流が返した残り呼び出し回数を成功時にも残す。これがあると、API を
+	// 余分に呼ばずに残量の推移・実際の上限・いつ戻るかを後から追える。
+	// ヘッダーが返らなかった回は付けない（空の値でログを埋めないため）。
+	if acc.RateLimitRemaining != "" {
+		attrs = append(attrs, "rate_limit_remaining", acc.RateLimitRemaining)
+	}
+	p.logger.Info("アカウントの収集が完了しました", attrs...)
 }
 
 // presentRateLimit はレート制限の顛末を出力する。

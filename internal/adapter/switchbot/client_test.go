@@ -128,3 +128,54 @@ func TestFetchStatus_キャンセル済みcontextでエラーを返す(t *testin
 	_, err := g.FetchStatus(ctx, testCred, "d1")
 	require.Error(t, err)
 }
+
+func TestTakeRemaining_成功した応答のヘッダーを覚える(t *testing.T) {
+	g := newTestGateway(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "9899")
+		_, _ = w.Write([]byte(`{"statusCode":100,"message":"success","body":{"deviceList":[],"infraredRemoteList":[]}}`))
+	})
+
+	_, err := g.ListDevices(context.Background(), testCred)
+	require.NoError(t, err)
+
+	assert.Equal(t, "9899", g.TakeRemaining())
+}
+
+func TestTakeRemaining_読んだら空に戻る(t *testing.T) {
+	g := newTestGateway(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "9899")
+		_, _ = w.Write([]byte(`{"statusCode":100,"message":"success","body":{"deviceList":[],"infraredRemoteList":[]}}`))
+	})
+
+	_, err := g.ListDevices(context.Background(), testCred)
+	require.NoError(t, err)
+
+	require.Equal(t, "9899", g.TakeRemaining())
+	// 2回目は空。API を1回も呼ばなかったアカウントに、直前のアカウントの
+	// 残量が付いてしまうのを防ぐため。
+	assert.Empty(t, g.TakeRemaining())
+}
+
+func TestTakeRemaining_ヘッダーが無ければ空文字列(t *testing.T) {
+	g := newTestGateway(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"statusCode":100,"message":"success","body":{"deviceList":[],"infraredRemoteList":[]}}`))
+	})
+
+	_, err := g.ListDevices(context.Background(), testCred)
+	require.NoError(t, err)
+
+	assert.Empty(t, g.TakeRemaining())
+}
+
+func TestTakeRemaining_エラー応答でも覚える(t *testing.T) {
+	g := newTestGateway(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"message":"Too Many Requests"}`))
+	})
+
+	_, err := g.ListDevices(context.Background(), testCred)
+	require.Error(t, err)
+
+	assert.Equal(t, "0", g.TakeRemaining())
+}

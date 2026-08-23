@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"switchBotStore/internal/domain"
@@ -25,8 +26,17 @@ const defaultTimeout = 30 * time.Second
 // 上流が HTML のエラーページなどを返したときにログ行が膨らむのを防ぐ。
 const maxLoggedBodyBytes = 512
 
+// headerRateLimitRemaining は上流が返す残り呼び出し回数のヘッダー名。
+//
+// 2026-08-23の実測では、SwitchBot API が返すレート制限系のヘッダーは
+// これ1本だけだった（X-RateLimit-Limit と X-RateLimit-Reset は返らない）。
+const headerRateLimitRemaining = "X-RateLimit-Remaining"
+
 // Gateway が出力ポートを満たすことをコンパイル時に検証する。
-var _ usecase.DeviceGateway = (*Gateway)(nil)
+var (
+	_ usecase.DeviceGateway     = (*Gateway)(nil)
+	_ usecase.RateLimitReporter = (*Gateway)(nil)
+)
 
 // Gateway は SwitchBot API v1.1 に対する usecase.DeviceGateway の実装。
 //
@@ -35,6 +45,10 @@ type Gateway struct {
 	httpClient *http.Client
 	apiBase    string
 	signer     *signer
+
+	// mu は lastRemaining を守る。1インスタンスを複数アカウントで共有するため。
+	mu            sync.Mutex
+	lastRemaining string
 }
 
 // NewGateway は既定の HTTP クライアントで Gateway を生成する。
@@ -96,6 +110,10 @@ func (g *Gateway) get(ctx context.Context, cred domain.Credential, path string) 
 	}
 	defer resp.Body.Close()
 
+	// 成功・失敗のどちらでも、上流が返した残り回数を記録する。
+	// 失敗時は GatewayError にも入るが、成功時はここでしか拾えない。
+	g.recordRemaining(resp.Header.Get(headerRateLimitRemaining))
+
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("レスポンスの読み込みに失敗しました: %w", err)
@@ -121,6 +139,24 @@ func (g *Gateway) get(ctx context.Context, cred domain.Credential, path string) 
 	return apiResp.Body, nil
 }
 
+// recordRemaining は直近の応答が返した残り回数を覚えておく。
+// ヘッダーが無かったときは空文字列で上書きする（古い値を残さない）。
+func (g *Gateway) recordRemaining(v string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.lastRemaining = v
+}
+
+// TakeRemaining は覚えている残り回数を返し、記録を空に戻す。
+func (g *Gateway) TakeRemaining() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	v := g.lastRemaining
+	g.lastRemaining = ""
+	return v
+}
+
 // newGatewayError は応答から詳細つきのエラーを組み立てる。
 //
 // レート制限の判定は HTTP 429 だけで行う。応答 JSON の statusCode=190 は
@@ -132,7 +168,7 @@ func newGatewayError(path string, resp *http.Response, raw []byte) *usecase.Gate
 		Path:        path,
 		HTTPStatus:  resp.StatusCode,
 		Body:        truncate(string(raw), maxLoggedBodyBytes),
-		Remaining:   resp.Header.Get("X-RateLimit-Remaining"),
+		Remaining:   resp.Header.Get(headerRateLimitRemaining),
 		Limit:       resp.Header.Get("X-RateLimit-Limit"),
 		Reset:       resp.Header.Get("X-RateLimit-Reset"),
 		RetryAfter:  resp.Header.Get("Retry-After"),

@@ -181,3 +181,53 @@ func TestPresent_OutcomeFailedだがエラーなしの場合もWARNで記録す�
 	}
 	assert.True(t, found, "OutcomeFailedのログが出力されていない")
 }
+
+func TestPresent_残り呼び出し回数を完了ログに載せる(t *testing.T) {
+	var buf bytes.Buffer
+	p := presenter.NewSlog(newTestLogger(&buf))
+
+	p.Present(usecase.CollectReport{Accounts: []usecase.AccountResult{{
+		AccountName: "acc1",
+		Devices: []usecase.DeviceResult{{
+			Device:  domain.Device{ID: "d1", Name: "温湿度計"},
+			Outcome: usecase.OutcomeStored,
+		}},
+		RateLimitRemaining: "9899",
+	}}})
+
+	entries := logEntries(t, &buf)
+
+	found := false
+	for _, e := range entries {
+		if e["msg"] == "アカウントの収集が完了しました" {
+			found = true
+			assert.Equal(t, "9899", e["rate_limit_remaining"])
+		}
+	}
+	assert.True(t, found, "完了ログが出力されていない")
+}
+
+func TestPresent_残り回数が無ければフィールドを付けない(t *testing.T) {
+	var buf bytes.Buffer
+	p := presenter.NewSlog(newTestLogger(&buf))
+
+	p.Present(usecase.CollectReport{Accounts: []usecase.AccountResult{{
+		AccountName: "acc1",
+		Devices: []usecase.DeviceResult{{
+			Device:  domain.Device{ID: "d1", Name: "温湿度計"},
+			Outcome: usecase.OutcomeStored,
+		}},
+	}}})
+
+	entries := logEntries(t, &buf)
+
+	found := false
+	for _, e := range entries {
+		if e["msg"] == "アカウントの収集が完了しました" {
+			found = true
+			_, has := e["rate_limit_remaining"]
+			assert.False(t, has, "空の残り回数はフィールドごと出さない")
+		}
+	}
+	assert.True(t, found, "完了ログが出力されていない")
+}
