@@ -53,6 +53,10 @@ type AccountResult struct {
 	Err         error
 	// RateLimit はレート制限に関する今回の顛末。関わりが無ければ nil。
 	RateLimit *RateLimitOutcome
+	// RateLimitRemaining は今回の最後の応答が返した残り呼び出し回数
+	// （X-RateLimit-Remaining の生の値）。API を呼ばなかったときと、
+	// ヘッダーが返らなかったときは空文字列。
+	RateLimitRemaining string
 }
 
 // RateLimited はこのアカウントがレート制限で収集できなかったかを返す。

@@ -23,6 +23,24 @@ type DeviceGateway interface {
 	FetchStatus(ctx context.Context, cred domain.Credential, id domain.DeviceID) (domain.StatusPayload, error)
 }
 
+// RateLimitReporter は上流が応答に載せてくる残り呼び出し回数を報告できる
+// DeviceGateway が、追加で満たすインターフェース。
+//
+// SwitchBot API は成功した応答にも X-RateLimit-Remaining を付けてくる。
+// 残量を問い合わせる専用の API は無いが、この値を毎回のログに残せば
+// API を1回も余分に呼ばずに「残量の推移・実際の上限・いつ戻るか」を
+// 観測できる。DeviceGateway 本体に含めないのは、この報告ができない
+// 実装（テスト用の偽物など）も引き続き使えるようにするため。
+type RateLimitReporter interface {
+	// TakeRemaining は前回の呼び出し以降に受け取った応答のうち、最後の
+	// X-RateLimit-Remaining をそのまま返し、内部の記録を空に戻す。
+	//
+	// 読んだら消すのは、アカウントごとに枠が別なため。API を1回も呼ばな
+	// かったアカウントに、直前のアカウントの残量が付いてしまうのを防ぐ。
+	// 応答が無かった場合とヘッダーが無かった場合は空文字列を返す。
+	TakeRemaining() string
+}
+
 // DeviceRecord は永続化済みのデバイスと、その devices.id の対。
 //
 // ID がゼロ値のときは「まだ devices へ登録していない」ことを表す。

@@ -555,3 +555,73 @@ func TestExecute_同期時刻の記録失敗はアカウント単位の致命的
 	// ステータス自体は保存できている（記録の失敗で収集結果を捨てない）。
 	assert.Len(t, repo.statuses, 1)
 }
+
+// reportingGateway は残り呼び出し回数も報告できる fakeGateway。
+// 本物と同じく、読んだら記録が空に戻る。
+type reportingGateway struct {
+	*fakeGateway
+	remaining string
+}
+
+func (g *reportingGateway) TakeRemaining() string {
+	v := g.remaining
+	g.remaining = ""
+	return v
+}
+
+func TestExecute_残り呼び出し回数をレポートに載せる(t *testing.T) {
+	gw := &reportingGateway{
+		fakeGateway: &fakeGateway{
+			devices:  map[string][]domain.Device{"tok1": {physicalDevice("d1", "温湿度計")}},
+			statuses: map[domain.DeviceID]domain.StatusPayload{"d1": []byte(`{}`)},
+		},
+		remaining: "9899",
+	}
+
+	uc := usecase.NewCollectStatus(gw, newFakeRepo(), fixedClock{t: testNow}, 0)
+	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
+
+	require.NoError(t, report.FatalError())
+	assert.Equal(t, "9899", report.Accounts[0].RateLimitRemaining)
+}
+
+func TestExecute_残りを報告できないgatewayでは空のままにする(t *testing.T) {
+	gw := &fakeGateway{
+		devices:  map[string][]domain.Device{"tok1": {physicalDevice("d1", "温湿度計")}},
+		statuses: map[domain.DeviceID]domain.StatusPayload{"d1": []byte(`{}`)},
+	}
+
+	uc := usecase.NewCollectStatus(gw, newFakeRepo(), fixedClock{t: testNow}, 0)
+	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
+
+	require.NoError(t, report.FatalError())
+	assert.Empty(t, report.Accounts[0].RateLimitRemaining)
+}
+
+func TestExecute_残り回数を別のアカウントに持ち越さない(t *testing.T) {
+	gw := &reportingGateway{
+		fakeGateway: &fakeGateway{
+			devices: map[string][]domain.Device{
+				"tok1": {physicalDevice("d1", "温湿度計")},
+				"tok2": {physicalDevice("d2", "CO2センサー")},
+			},
+			statuses: map[domain.DeviceID]domain.StatusPayload{
+				"d1": []byte(`{}`),
+				"d2": []byte(`{}`),
+			},
+		},
+		remaining: "9899",
+	}
+
+	uc := usecase.NewCollectStatus(gw, newFakeRepo(), fixedClock{t: testNow}, 0)
+	report := uc.Execute(context.Background(), []domain.Account{
+		account("acc1", "tok1"),
+		account("acc2", "tok2"),
+	})
+
+	require.NoError(t, report.FatalError())
+	require.Len(t, report.Accounts, 2)
+	assert.Equal(t, "9899", report.Accounts[0].RateLimitRemaining)
+	// アカウントごとに枠が別なので、直前の値を付け回さない。
+	assert.Empty(t, report.Accounts[1].RateLimitRemaining)
+}

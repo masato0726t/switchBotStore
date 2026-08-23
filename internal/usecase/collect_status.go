@@ -41,9 +41,23 @@ func (uc *CollectStatus) Execute(ctx context.Context, accounts []domain.Account)
 
 	report := CollectReport{Accounts: make([]AccountResult, 0, len(accounts))}
 	for _, acc := range accounts {
-		report.Accounts = append(report.Accounts, uc.collectAccount(ctx, acc, recordedAt))
+		result := uc.collectAccount(ctx, acc, recordedAt)
+		// 上流が応答に載せてきた残り回数を、このアカウントの結果に添える。
+		// 収集の成否にかかわらず添えるので、失敗した回の残量も残る。
+		result.RateLimitRemaining = uc.takeRateLimitRemaining()
+		report.Accounts = append(report.Accounts, result)
 	}
 	return report
+}
+
+// takeRateLimitRemaining は gateway が残り回数を報告できるなら、その値を取り出す。
+// 報告できない実装のときは空文字列を返す。
+func (uc *CollectStatus) takeRateLimitRemaining() string {
+	reporter, ok := uc.gateway.(RateLimitReporter)
+	if !ok {
+		return ""
+	}
+	return reporter.TakeRemaining()
 }
 
 func (uc *CollectStatus) collectAccount(ctx context.Context, acc domain.Account, recordedAt time.Time) AccountResult {
