@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -182,5 +183,36 @@ func TestLoad_不正なログレベルでエラー(t *testing.T) {
 
 			require.Error(t, err)
 		})
+	}
+}
+
+func TestLoad_device_list_cache_ttlを解釈する(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want time.Duration
+	}{
+		{name: "未指定なら既定の24時間", raw: "", want: config.DefaultDeviceListCacheTTL},
+		{name: "指定した値を使う", raw: `,"device_list_cache_ttl":"30m"`, want: 30 * time.Minute},
+		{name: "0ならキャッシュを使わない", raw: `,"device_list_cache_ttl":"0"`, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, `{"database":{"host":"h"},"accounts":[{"token":"t","secret":"s"}]`+tt.raw+`}`)
+
+			cfg, err := config.Load(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.DeviceCacheTTL())
+		})
+	}
+}
+
+func TestLoad_device_list_cache_ttlが不正なら失敗する(t *testing.T) {
+	for _, raw := range []string{`"なんとか"`, `"-1h"`} {
+		path := writeConfig(t, `{"database":{"host":"h"},"accounts":[{"token":"t","secret":"s"}],"device_list_cache_ttl":`+raw+`}`)
+
+		_, err := config.Load(path)
+		require.Error(t, err, "不正な値: %s", raw)
+		assert.Contains(t, err.Error(), "device_list_cache_ttl")
 	}
 }

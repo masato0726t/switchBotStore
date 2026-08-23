@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -54,6 +55,55 @@ func (s *Store) SaveAccount(ctx context.Context, a domain.Account) (domain.Accou
 		return 0, fmt.Errorf("アカウント ID の取得に失敗しました: %w", err)
 	}
 	return domain.AccountID(saved.ID), nil
+}
+
+// LoadDeviceCache は accountID に登録済みのデバイスと、一覧を API から
+// 最後に取得した日時を返す。
+//
+// devices_synced_at が NULL（一度も取得していない）のときは、デバイスの
+// 読み出しまで行わずゼロ値を返す。呼び出し側はどのみち API を叩き直す。
+func (s *Store) LoadDeviceCache(ctx context.Context, accountID domain.AccountID) ([]usecase.DeviceRecord, time.Time, error) {
+	var account apiAccountModel
+	err := s.db.WithContext(ctx).
+		Select("devices_synced_at").
+		Where("id = ?", int64(accountID)).
+		Take(&account).Error
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("アカウントの取得に失敗しました: %w", err)
+	}
+	if account.DevicesSyncedAt == nil {
+		return nil, time.Time{}, nil
+	}
+
+	var rows []deviceModel
+	err = s.db.WithContext(ctx).
+		Where("api_account_id = ?", int64(accountID)).
+		Order("id").
+		Find(&rows).Error
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("デバイス一覧の取得に失敗しました: %w", err)
+	}
+
+	records := make([]usecase.DeviceRecord, 0, len(rows))
+	for _, row := range rows {
+		records = append(records, toDeviceRecord(row))
+	}
+	return records, *account.DevicesSyncedAt, nil
+}
+
+// MarkDevicesSynced はデバイス一覧を API から取得した日時を記録する。
+//
+// UpdateColumn を使うのは、GORM による updated_at の自動更新を避けるため。
+// 列定義の ON UPDATE CURRENT_TIMESTAMP に任せる方針は SaveDevice と同じ。
+func (s *Store) MarkDevicesSynced(ctx context.Context, accountID domain.AccountID, at time.Time) error {
+	err := s.db.WithContext(ctx).
+		Model(&apiAccountModel{}).
+		Where("id = ?", int64(accountID)).
+		UpdateColumn("devices_synced_at", at).Error
+	if err != nil {
+		return fmt.Errorf("デバイス一覧の同期時刻の更新に失敗しました: %w", err)
+	}
+	return nil
 }
 
 // SaveDevice はデバイスを登録し、(api_account_id, device_id) が同一の行が

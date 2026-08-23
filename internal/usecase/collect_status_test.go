@@ -22,9 +22,12 @@ type fakeGateway struct {
 	listErr    map[string]error           // token → ListDevices が返すエラー
 	statuses   map[domain.DeviceID]domain.StatusPayload
 	statusErrs map[domain.DeviceID]error
+
+	listCalls int // ListDevices が呼ばれた回数（API 呼び出しの節約を検証する）
 }
 
 func (g *fakeGateway) ListDevices(_ context.Context, cred domain.Credential) ([]domain.Device, error) {
+	g.listCalls++
 	if err, ok := g.listErr[cred.Token]; ok {
 		return nil, err
 	}
@@ -50,16 +53,77 @@ type fakeRepo struct {
 	deviceIDs  map[string]domain.DeviceRecordID // "accountID/deviceID" → ID
 	statuses   []savedStatus
 
-	accountErr error
-	deviceErr  error
-	statusErr  error
+	// cache は LoadDeviceCache が返す内容。accountID ごとに保持する。
+	cache     map[domain.AccountID][]usecase.DeviceRecord
+	syncedAt  map[domain.AccountID]time.Time
+	syncMarks []syncMark
+
+	// rateLimit は LoadRateLimitState が返す待機状態。
+	// rateLimitSaves は SaveRateLimitState の呼び出し履歴。
+	rateLimit      map[domain.AccountID]usecase.RateLimitState
+	rateLimitSaves []rateLimitSave
+
+	accountErr       error
+	deviceErr        error
+	statusErr        error
+	cacheErr         error
+	syncErr          error
+	rateLimitLoadErr error
+	rateLimitSaveErr error
+}
+
+// rateLimitSave は SaveRateLimitState の呼び出し1件分。
+type rateLimitSave struct {
+	accountID domain.AccountID
+	state     usecase.RateLimitState
+}
+
+// syncMark は MarkDevicesSynced の呼び出し1件分。
+type syncMark struct {
+	accountID domain.AccountID
+	at        time.Time
 }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		accountIDs: make(map[string]domain.AccountID),
 		deviceIDs:  make(map[string]domain.DeviceRecordID),
+		cache:      make(map[domain.AccountID][]usecase.DeviceRecord),
+		syncedAt:   make(map[domain.AccountID]time.Time),
+		rateLimit:  make(map[domain.AccountID]usecase.RateLimitState),
 	}
+}
+
+func (r *fakeRepo) LoadRateLimitState(_ context.Context, accountID domain.AccountID) (usecase.RateLimitState, error) {
+	if r.rateLimitLoadErr != nil {
+		return usecase.RateLimitState{}, r.rateLimitLoadErr
+	}
+	return r.rateLimit[accountID], nil
+}
+
+func (r *fakeRepo) SaveRateLimitState(_ context.Context, accountID domain.AccountID, state usecase.RateLimitState) error {
+	if r.rateLimitSaveErr != nil {
+		return r.rateLimitSaveErr
+	}
+	r.rateLimitSaves = append(r.rateLimitSaves, rateLimitSave{accountID: accountID, state: state})
+	r.rateLimit[accountID] = state
+	return nil
+}
+
+func (r *fakeRepo) LoadDeviceCache(_ context.Context, accountID domain.AccountID) ([]usecase.DeviceRecord, time.Time, error) {
+	if r.cacheErr != nil {
+		return nil, time.Time{}, r.cacheErr
+	}
+	return r.cache[accountID], r.syncedAt[accountID], nil
+}
+
+func (r *fakeRepo) MarkDevicesSynced(_ context.Context, accountID domain.AccountID, at time.Time) error {
+	if r.syncErr != nil {
+		return r.syncErr
+	}
+	r.syncMarks = append(r.syncMarks, syncMark{accountID: accountID, at: at})
+	r.syncedAt[accountID] = at
+	return nil
 }
 
 func (r *fakeRepo) SaveAccount(_ context.Context, a domain.Account) (domain.AccountID, error) {
@@ -137,7 +201,7 @@ func TestExecute_物理デバイスのステータスを保存する(t *testing.
 	}
 	repo := newFakeRepo()
 
-	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow})
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 0)
 	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
 
 	require.NoError(t, report.FatalError())
@@ -159,7 +223,7 @@ func TestExecute_クラウド無効のデバイスは登録のみでスキップ
 	}
 	repo := newFakeRepo()
 
-	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow})
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 0)
 	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
 
 	require.NoError(t, report.FatalError())
@@ -180,7 +244,7 @@ func TestExecute_赤外線リモコンは登録のみ行う(t *testing.T) {
 	gw := &fakeGateway{devices: map[string][]domain.Device{"tok1": {ir}}}
 	repo := newFakeRepo()
 
-	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow})
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 0)
 	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
 
 	require.NoError(t, report.FatalError())
@@ -202,7 +266,7 @@ func TestExecute_複数アカウントを処理する(t *testing.T) {
 	}
 	repo := newFakeRepo()
 
-	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow})
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 0)
 	report := uc.Execute(context.Background(), []domain.Account{
 		account("acc1", "tok1"),
 		account("acc2", "tok2"),
@@ -219,7 +283,7 @@ func TestExecute_デバイス一覧の取得失敗はアカウント単位の致
 	gw := &fakeGateway{listErr: map[string]error{"tok1": wantErr}}
 	repo := newFakeRepo()
 
-	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow})
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 0)
 	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
 
 	require.Error(t, report.FatalError())
@@ -233,7 +297,7 @@ func TestExecute_アカウント登録の失敗はアカウント単位の致命
 	repo := newFakeRepo()
 	repo.accountErr = wantErr
 
-	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow})
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 0)
 	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
 
 	require.Error(t, report.FatalError())
@@ -250,7 +314,7 @@ func TestExecute_ステータス取得の失敗は他のデバイスを止めな
 	}
 	repo := newFakeRepo()
 
-	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow})
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 0)
 	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
 
 	require.NoError(t, report.FatalError(), "デバイス単位の失敗は致命的エラーにしない")
@@ -271,7 +335,7 @@ func TestExecute_ステータス保存の失敗は他のデバイスを止めな
 	repo := newFakeRepo()
 	repo.statusErr = errors.New("DB 書き込みエラー")
 
-	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow})
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 0)
 	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
 
 	require.NoError(t, report.FatalError())
@@ -286,7 +350,7 @@ func TestExecute_デバイス登録の失敗はそのデバイスのみ失敗に
 	repo := newFakeRepo()
 	repo.deviceErr = errors.New("DB エラー")
 
-	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow})
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 0)
 	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
 
 	require.NoError(t, report.FatalError())
@@ -302,7 +366,7 @@ func TestExecute_全デバイスが同じ収集時刻を共有する(t *testing.
 	}
 	repo := newFakeRepo()
 
-	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow})
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 0)
 	uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
 
 	require.Len(t, repo.statuses, 2)
@@ -327,4 +391,167 @@ func TestFatalError_複数アカウントのエラーを全件保持する(t *te
 func TestFatalError_エラーがなければnilを返す(t *testing.T) {
 	report := usecase.CollectReport{Accounts: []usecase.AccountResult{{AccountName: "a1"}}}
 	assert.NoError(t, report.FatalError())
+}
+
+// ---------- デバイス一覧キャッシュ ----------
+
+// cachedDevice は devices テーブルに登録済みのデバイスを表すヘルパー。
+func cachedDevice(recordID int64, dev domain.Device) usecase.DeviceRecord {
+	return usecase.DeviceRecord{ID: domain.DeviceRecordID(recordID), Device: dev}
+}
+
+func TestExecute_キャッシュが新しければデバイス一覧APIを呼ばない(t *testing.T) {
+	dev := physicalDevice("d1", "温湿度計")
+	gw := &fakeGateway{
+		devices:  map[string][]domain.Device{"tok1": {dev}},
+		statuses: map[domain.DeviceID]domain.StatusPayload{"d1": []byte(`{}`)},
+	}
+	repo := newFakeRepo()
+	repo.accountIDs["tok1"] = 1
+	repo.cache[1] = []usecase.DeviceRecord{cachedDevice(42, dev)}
+	repo.syncedAt[1] = testNow.Add(-1 * time.Hour)
+
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 24*time.Hour)
+	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
+
+	require.NoError(t, report.FatalError())
+	assert.Equal(t, 0, gw.listCalls, "キャッシュが有効な間は /v1.1/devices を呼ばない")
+	assert.Equal(t, []usecase.Outcome{usecase.OutcomeStored}, outcomes(report.Accounts[0]))
+
+	// devices への登録もやり直さず、キャッシュの devices.id をそのまま使う。
+	assert.Empty(t, repo.deviceIDs, "登録済みのデバイスを保存し直さない")
+	require.Len(t, repo.statuses, 1)
+	assert.Equal(t, domain.DeviceRecordID(42), repo.statuses[0].deviceRecordID)
+	assert.Empty(t, repo.syncMarks, "API を叩いていないので同期時刻は進めない")
+}
+
+func TestExecute_キャッシュが期限切れならAPIから取り直す(t *testing.T) {
+	dev := physicalDevice("d1", "温湿度計")
+	gw := &fakeGateway{
+		devices:  map[string][]domain.Device{"tok1": {dev}},
+		statuses: map[domain.DeviceID]domain.StatusPayload{"d1": []byte(`{}`)},
+	}
+	repo := newFakeRepo()
+	repo.accountIDs["tok1"] = 1
+	repo.cache[1] = []usecase.DeviceRecord{cachedDevice(42, dev)}
+	repo.syncedAt[1] = testNow.Add(-25 * time.Hour)
+
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 24*time.Hour)
+	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
+
+	require.NoError(t, report.FatalError())
+	assert.Equal(t, 1, gw.listCalls)
+	assert.Equal(t, []syncMark{{accountID: 1, at: testNow}}, repo.syncMarks,
+		"取り直したら同期時刻を収集時刻まで進める")
+}
+
+func TestExecute_キャッシュが空なら期限内でもAPIから取り直す(t *testing.T) {
+	dev := physicalDevice("d1", "温湿度計")
+	gw := &fakeGateway{
+		devices:  map[string][]domain.Device{"tok1": {dev}},
+		statuses: map[domain.DeviceID]domain.StatusPayload{"d1": []byte(`{}`)},
+	}
+	repo := newFakeRepo()
+	repo.accountIDs["tok1"] = 1
+	repo.syncedAt[1] = testNow.Add(-1 * time.Minute) // 時刻だけ残り、デバイスは0件
+
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 24*time.Hour)
+	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
+
+	require.NoError(t, report.FatalError())
+	assert.Equal(t, 1, gw.listCalls, "一覧が空のまま API を呼ばなくなるのを防ぐ")
+}
+
+func TestExecute_時計が巻き戻ってもAPIから取り直す(t *testing.T) {
+	dev := physicalDevice("d1", "温湿度計")
+	gw := &fakeGateway{
+		devices:  map[string][]domain.Device{"tok1": {dev}},
+		statuses: map[domain.DeviceID]domain.StatusPayload{"d1": []byte(`{}`)},
+	}
+	repo := newFakeRepo()
+	repo.accountIDs["tok1"] = 1
+	repo.cache[1] = []usecase.DeviceRecord{cachedDevice(42, dev)}
+	repo.syncedAt[1] = testNow.Add(1 * time.Hour) // 未来の時刻
+
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 24*time.Hour)
+	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
+
+	require.NoError(t, report.FatalError())
+	assert.Equal(t, 1, gw.listCalls)
+}
+
+func TestExecute_TTLが0ならキャッシュを読みに行かない(t *testing.T) {
+	dev := physicalDevice("d1", "温湿度計")
+	gw := &fakeGateway{
+		devices:  map[string][]domain.Device{"tok1": {dev}},
+		statuses: map[domain.DeviceID]domain.StatusPayload{"d1": []byte(`{}`)},
+	}
+	repo := newFakeRepo()
+	repo.accountIDs["tok1"] = 1
+	repo.cache[1] = []usecase.DeviceRecord{cachedDevice(42, dev)}
+	repo.syncedAt[1] = testNow
+	repo.cacheErr = errors.New("読まれたら失敗するはず")
+
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 0)
+	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
+
+	require.NoError(t, report.FatalError())
+	assert.Equal(t, 1, gw.listCalls)
+}
+
+func TestExecute_デバイス登録に失敗したら同期時刻を進めない(t *testing.T) {
+	gw := &fakeGateway{
+		devices: map[string][]domain.Device{"tok1": {physicalDevice("d1", "温湿度計")}},
+	}
+	repo := newFakeRepo()
+	repo.deviceErr = errors.New("登録失敗")
+
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 24*time.Hour)
+	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
+
+	require.NoError(t, report.FatalError())
+	assert.Equal(t, []usecase.Outcome{usecase.OutcomeFailed}, outcomes(report.Accounts[0]))
+	assert.Empty(t, repo.syncMarks, "欠けた一覧をキャッシュとして使わせない")
+}
+
+func TestExecute_ステータス取得の失敗では同期時刻を進める(t *testing.T) {
+	gw := &fakeGateway{
+		devices:    map[string][]domain.Device{"tok1": {physicalDevice("d1", "温湿度計")}},
+		statusErrs: map[domain.DeviceID]error{"d1": errors.New("取得失敗")},
+	}
+	repo := newFakeRepo()
+
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 24*time.Hour)
+	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
+
+	require.NoError(t, report.FatalError())
+	assert.Len(t, repo.syncMarks, 1, "一覧そのものは正しく取れているのでキャッシュしてよい")
+}
+
+func TestExecute_キャッシュ読み込みの失敗はアカウント単位の致命的エラーになる(t *testing.T) {
+	gw := &fakeGateway{devices: map[string][]domain.Device{"tok1": {physicalDevice("d1", "温湿度計")}}}
+	repo := newFakeRepo()
+	repo.cacheErr = errors.New("DB 障害")
+
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 24*time.Hour)
+	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
+
+	require.Error(t, report.FatalError())
+	assert.Equal(t, 0, gw.listCalls)
+}
+
+func TestExecute_同期時刻の記録失敗はアカウント単位の致命的エラーになる(t *testing.T) {
+	gw := &fakeGateway{
+		devices:  map[string][]domain.Device{"tok1": {physicalDevice("d1", "温湿度計")}},
+		statuses: map[domain.DeviceID]domain.StatusPayload{"d1": []byte(`{}`)},
+	}
+	repo := newFakeRepo()
+	repo.syncErr = errors.New("UPDATE 失敗")
+
+	uc := usecase.NewCollectStatus(gw, repo, fixedClock{t: testNow}, 24*time.Hour)
+	report := uc.Execute(context.Background(), []domain.Account{account("acc1", "tok1")})
+
+	require.Error(t, report.FatalError())
+	// ステータス自体は保存できている（記録の失敗で収集結果を捨てない）。
+	assert.Len(t, repo.statuses, 1)
 }

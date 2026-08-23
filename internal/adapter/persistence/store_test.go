@@ -82,6 +82,7 @@ func newDryRunStore(t *testing.T) (*Store, *sqlCapture) {
 	}
 	require.NoError(t, db.Callback().Create().After("gorm:create").Register("test:capture", record))
 	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:capture", record))
+	require.NoError(t, db.Callback().Update().After("gorm:update").Register("test:capture", record))
 
 	return New(db), capture
 }
@@ -121,8 +122,11 @@ func TestSaveAccount_発行するSQL(t *testing.T) {
 	insert, selectStmt := capture.pair(t)
 
 	assert.Equal(t,
-		"INSERT INTO `api_accounts` (`name`,`token`,`secret`,`created_at`,`updated_at`) "+
-			"VALUES (?,?,?,?,?) "+
+		"INSERT INTO `api_accounts` "+
+			"(`name`,`token`,`secret`,`devices_synced_at`,"+
+			"`rate_limited_until`,`rate_limited_since`,`rate_limit_failures`,"+
+			"`created_at`,`updated_at`) "+
+			"VALUES (?,?,?,?,?,?,?,?,?) "+
 			"ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`secret`=VALUES(`secret`)",
 		insert.SQL)
 
@@ -130,8 +134,16 @@ func TestSaveAccount_発行するSQL(t *testing.T) {
 	assertNotUpdated(t, insert.SQL, "token", "token は競合キーなので更新対象に含めてはならない")
 	assertNotUpdated(t, insert.SQL, "updated_at",
 		"updated_at を代入すると中身が同じでも毎回書き込みが発生する。列定義の ON UPDATE CURRENT_TIMESTAMP に任せる")
+	assertNotUpdated(t, insert.SQL, "devices_synced_at",
+		"更新対象に含めると毎回 NULL で上書きされ、デバイス一覧のキャッシュが効かなくなる")
+	assertNotUpdated(t, insert.SQL, "rate_limited_until",
+		"更新対象に含めると毎回 NULL で上書きされ、レート制限のバックオフが効かなくなる")
+	assertNotUpdated(t, insert.SQL, "rate_limited_since",
+		"更新対象に含めると毎回 NULL で上書きされ、制限が続いた時間を見失う")
+	assertNotUpdated(t, insert.SQL, "rate_limit_failures",
+		"更新対象に含めると毎回 0 で上書きされ、待機時間が伸びなくなる")
 
-	require.Len(t, insert.Vars, 5)
+	require.Len(t, insert.Vars, 9)
 	assert.Equal(t, "メインアカウント", insert.Vars[0])
 	assert.Equal(t, "tok1", insert.Vars[1])
 	assert.Equal(t, "sec1", insert.Vars[2])
@@ -238,4 +250,33 @@ func TestAppendStatus_発行するSQL(t *testing.T) {
 	assert.Equal(t, int64(42), insert.Vars[0])
 	assert.Equal(t, `{"temperature":25.5}`, insert.Vars[1], "status_data は文字列として渡す")
 	assert.Equal(t, recordedAt, insert.Vars[2], "recorded_at は渡された時刻をそのまま使う")
+}
+
+func TestLoadDeviceCache_同期時刻がNULLならデバイスを読みに行かない(t *testing.T) {
+	store, capture := newDryRunStore(t)
+
+	// DryRun では SELECT の結果が返らないため devices_synced_at は nil のまま。
+	_, syncedAt, err := store.LoadDeviceCache(context.Background(), 7)
+	require.NoError(t, err)
+	assert.True(t, syncedAt.IsZero())
+
+	stmt := capture.only(t)
+	assert.Equal(t, "SELECT `devices_synced_at` FROM `api_accounts` WHERE id = ? LIMIT ?", stmt.SQL)
+	require.Len(t, stmt.Vars, 2)
+	assert.Equal(t, int64(7), stmt.Vars[0])
+}
+
+func TestMarkDevicesSynced_発行するSQL(t *testing.T) {
+	store, capture := newDryRunStore(t)
+
+	at := time.Date(2026, 8, 23, 9, 0, 0, 0, time.UTC)
+	require.NoError(t, store.MarkDevicesSynced(context.Background(), 7, at))
+
+	stmt := capture.only(t)
+	assert.Equal(t, "UPDATE `api_accounts` SET `devices_synced_at`=? WHERE id = ?", stmt.SQL)
+	assert.NotContains(t, stmt.SQL, "updated_at",
+		"updated_at は列定義の ON UPDATE CURRENT_TIMESTAMP に任せる")
+	require.Len(t, stmt.Vars, 2)
+	assert.Equal(t, at, stmt.Vars[0])
+	assert.Equal(t, int64(7), stmt.Vars[1])
 }

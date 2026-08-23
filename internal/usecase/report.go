@@ -51,6 +51,13 @@ type AccountResult struct {
 	AccountName string
 	Devices     []DeviceResult
 	Err         error
+	// RateLimit はレート制限に関する今回の顛末。関わりが無ければ nil。
+	RateLimit *RateLimitOutcome
+}
+
+// RateLimited はこのアカウントがレート制限で収集できなかったかを返す。
+func (a AccountResult) RateLimited() bool {
+	return errors.Is(a.Err, ErrRateLimited)
 }
 
 // CollectReport は収集処理全体の結果。
@@ -58,15 +65,33 @@ type CollectReport struct {
 	Accounts []AccountResult
 }
 
+// RateLimited はレート制限で収集できなかったアカウントがあるかを返す。
+//
+// 呼び出し元は「処理は正常に終わったが、データは1件も増えていない」ことを
+// ログに書き分けるために使う。
+func (r CollectReport) RateLimited() bool {
+	for _, a := range r.Accounts {
+		if a.RateLimited() {
+			return true
+		}
+	}
+	return false
+}
+
 // FatalError はアカウント単位の致命的エラーを集約して返す。1件もなければ nil。
 //
 // 呼び出し元はこの戻り値をそのままプロセスの終了コード判定に使う
 // （非 nil なら exit 1）。デバイス1台の失敗は含まれないため、
 // オフラインのデバイスがあっても正常終了する。
+//
+// レート制限 (ErrRateLimited) も除く。こちらの不具合ではなく待てば直るもので、
+// 毎分 exit 1 を返すと systemd がユニットを failed にし、
+// ServiceFailed の警報が制限の続くあいだ鳴り続けてしまうため。
+// 見送ったことは WARN のログ行として残る。
 func (r CollectReport) FatalError() error {
 	errs := make([]error, 0, len(r.Accounts))
 	for _, a := range r.Accounts {
-		if a.Err != nil {
+		if a.Err != nil && !errors.Is(a.Err, ErrRateLimited) {
 			errs = append(errs, a.Err)
 		}
 	}

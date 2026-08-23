@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -46,6 +47,11 @@ func main() {
 // main から defer が確実に実行されるよう、処理は必ずこの関数に置く
 // (log.Fatalf や os.Exit を途中で呼ぶと defer が飛ばされる)。
 func run() (retErr error) {
+	// デバイス構成を変えた直後に、キャッシュの期限を待たず反映させるための逃げ道。
+	refreshDevices := flag.Bool("refresh-devices", false,
+		"デバイス一覧のキャッシュを無視して、この実行では必ず API から取り直す")
+	flag.Parse()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -76,9 +82,15 @@ func run() (retErr error) {
 		}
 	}()
 
+	deviceCacheTTL := cfg.DeviceCacheTTL()
+	if *refreshDevices {
+		deviceCacheTTL = 0
+	}
+
 	logger.Info("設定を読み込みました",
 		"accounts", len(cfg.Accounts),
-		"log_dir", cfg.LogDir)
+		"log_dir", cfg.LogDir,
+		"device_list_cache_ttl", deviceCacheTTL.String())
 
 	db, closeDB, err := mysql.Connect(ctx, mysql.Config{
 		Host:     cfg.Database.Host,
@@ -109,6 +121,7 @@ func run() (retErr error) {
 		switchbot.NewGateway(),
 		persistence.New(db),
 		systemClock{},
+		deviceCacheTTL,
 	)
 
 	logger.Info("データ収集を開始します")
@@ -117,6 +130,14 @@ func run() (retErr error) {
 
 	if err := report.FatalError(); err != nil {
 		return fmt.Errorf("データ収集中に致命的なエラーが発生しました: %w", err)
+	}
+
+	// レート制限で見送った回を「完了しました」と書くと、ログだけを見たときに
+	// 正常に記録できたのか1件も取れていないのか区別が付かない。書き分ける。
+	// 終了コードは 0 のまま（詳細は CollectReport.FatalError のコメント）。
+	if report.RateLimited() {
+		logger.Warn("レート制限のため、今回はデータを収集していません")
+		return nil
 	}
 	logger.Info("データ収集が完了しました")
 	return nil
