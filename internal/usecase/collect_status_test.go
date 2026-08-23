@@ -58,11 +58,24 @@ type fakeRepo struct {
 	syncedAt  map[domain.AccountID]time.Time
 	syncMarks []syncMark
 
-	accountErr error
-	deviceErr  error
-	statusErr  error
-	cacheErr   error
-	syncErr    error
+	// rateLimit は LoadRateLimitState が返す待機状態。
+	// rateLimitSaves は SaveRateLimitState の呼び出し履歴。
+	rateLimit      map[domain.AccountID]usecase.RateLimitState
+	rateLimitSaves []rateLimitSave
+
+	accountErr       error
+	deviceErr        error
+	statusErr        error
+	cacheErr         error
+	syncErr          error
+	rateLimitLoadErr error
+	rateLimitSaveErr error
+}
+
+// rateLimitSave は SaveRateLimitState の呼び出し1件分。
+type rateLimitSave struct {
+	accountID domain.AccountID
+	state     usecase.RateLimitState
 }
 
 // syncMark は MarkDevicesSynced の呼び出し1件分。
@@ -77,7 +90,24 @@ func newFakeRepo() *fakeRepo {
 		deviceIDs:  make(map[string]domain.DeviceRecordID),
 		cache:      make(map[domain.AccountID][]usecase.DeviceRecord),
 		syncedAt:   make(map[domain.AccountID]time.Time),
+		rateLimit:  make(map[domain.AccountID]usecase.RateLimitState),
 	}
+}
+
+func (r *fakeRepo) LoadRateLimitState(_ context.Context, accountID domain.AccountID) (usecase.RateLimitState, error) {
+	if r.rateLimitLoadErr != nil {
+		return usecase.RateLimitState{}, r.rateLimitLoadErr
+	}
+	return r.rateLimit[accountID], nil
+}
+
+func (r *fakeRepo) SaveRateLimitState(_ context.Context, accountID domain.AccountID, state usecase.RateLimitState) error {
+	if r.rateLimitSaveErr != nil {
+		return r.rateLimitSaveErr
+	}
+	r.rateLimitSaves = append(r.rateLimitSaves, rateLimitSave{accountID: accountID, state: state})
+	r.rateLimit[accountID] = state
+	return nil
 }
 
 func (r *fakeRepo) LoadDeviceCache(_ context.Context, accountID domain.AccountID) ([]usecase.DeviceRecord, time.Time, error) {

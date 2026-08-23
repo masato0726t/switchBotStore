@@ -131,6 +131,14 @@ func run() (retErr error) {
 	if err := report.FatalError(); err != nil {
 		return fmt.Errorf("データ収集中に致命的なエラーが発生しました: %w", err)
 	}
+
+	// レート制限で見送った回を「完了しました」と書くと、ログだけを見たときに
+	// 正常に記録できたのか1件も取れていないのか区別が付かない。書き分ける。
+	// 終了コードは 0 のまま（詳細は CollectReport.FatalError のコメント）。
+	if report.RateLimited() {
+		logger.Warn("レート制限のため、今回はデータを収集していません")
+		return nil
+	}
 	logger.Info("データ収集が完了しました")
 	return nil
 }

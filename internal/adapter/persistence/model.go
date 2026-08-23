@@ -16,8 +16,15 @@ type apiAccountModel struct {
 	// DevicesSyncedAt はデバイス一覧を API から最後に取得した日時。
 	// 一度も取得していない行では NULL になるためポインタで受ける。
 	DevicesSyncedAt *time.Time `gorm:"column:devices_synced_at"`
-	CreatedAt       time.Time  `gorm:"column:created_at"`
-	UpdatedAt       time.Time  `gorm:"column:updated_at"`
+	// RateLimitedUntil はレート制限で待機する期限。待機していなければ NULL。
+	RateLimitedUntil *time.Time `gorm:"column:rate_limited_until"`
+	// RateLimitedSince は連続した 429 のうち最初のものを受けた日時。
+	// 待機していなければ NULL。
+	RateLimitedSince *time.Time `gorm:"column:rate_limited_since"`
+	// RateLimitFailures は連続して 429 を受けた回数。待機時間の算出に使う。
+	RateLimitFailures int       `gorm:"column:rate_limit_failures"`
+	CreatedAt         time.Time `gorm:"column:created_at"`
+	UpdatedAt         time.Time `gorm:"column:updated_at"`
 }
 
 // TableName は GORM が使うテーブル名を返す。

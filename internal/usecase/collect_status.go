@@ -55,16 +55,45 @@ func (uc *CollectStatus) collectAccount(ctx context.Context, acc domain.Account,
 		return result
 	}
 
+	// レート制限で待機中なら API を1回も呼ばずに見送る。
+	// 呼んでも 429 が返るだけなので、上流にも自分のログにも負荷をかけない。
+	state, err := uc.repo.LoadRateLimitState(ctx, accountID)
+	if err != nil {
+		result.Err = fmt.Errorf("レート制限の待機状態の読み込みに失敗しました: %w", err)
+		return result
+	}
+	if state.Blocked(recordedAt) {
+		result.Err = fmt.Errorf("%w: 待機中のため収集を見送りました", ErrRateLimited)
+		result.RateLimit = &RateLimitOutcome{
+			Phase:      RateLimitPhaseWaiting,
+			State:      state,
+			BlockedFor: state.BlockedFor(recordedAt),
+			RetryIn:    state.Until.Sub(recordedAt),
+		}
+		return result
+	}
+
 	records, fromAPI, err := uc.deviceRecords(ctx, acc, accountID, recordedAt)
 	if err != nil {
 		result.Err = err
+		if errors.Is(err, ErrRateLimited) {
+			result.RateLimit = uc.recordRateLimitHit(ctx, accountID, state, recordedAt, &result)
+		}
 		return result
 	}
 
 	result.Devices = make([]DeviceResult, 0, len(records))
 	for _, rec := range records {
-		result.Devices = append(result.Devices,
-			uc.collectDevice(ctx, acc.Credential, accountID, rec, recordedAt))
+		devResult := uc.collectDevice(ctx, acc.Credential, accountID, rec, recordedAt)
+		result.Devices = append(result.Devices, devResult)
+
+		// 途中で制限に当たったら残りのデバイスは呼ばない。同じ 429 を
+		// 繰り返すだけで、取得できるものは増えないため。
+		if errors.Is(devResult.Err, ErrRateLimited) {
+			result.Err = fmt.Errorf("%w: 収集の途中で制限に当たりました", ErrRateLimited)
+			result.RateLimit = uc.recordRateLimitHit(ctx, accountID, state, recordedAt, &result)
+			return result
+		}
 	}
 
 	// API から取り直した一覧を全件 devices へ反映できたときだけ、同期時刻を
@@ -76,9 +105,54 @@ func (uc *CollectStatus) collectAccount(ctx context.Context, acc domain.Account,
 			// 致命的エラーとして扱う（黙って毎回 API を叩き続けるより、
 			// 気づける形で失敗させる）。
 			result.Err = fmt.Errorf("デバイス一覧の同期時刻の記録に失敗しました: %w", err)
+			return result
+		}
+	}
+
+	// ここまで来たということは API が応答している。待機状態が残っていれば解除する。
+	if state.Active() {
+		blockedFor := state.BlockedFor(recordedAt)
+		if err := uc.repo.SaveRateLimitState(ctx, accountID, RateLimitState{}); err != nil {
+			// 解除に失敗しても収集自体は成功しているので、致命的エラーにはしない。
+			// 次回以降も待機し続けてしまうため、警告として残す。
+			result.Devices = append(result.Devices, DeviceResult{
+				Outcome: OutcomeFailed,
+				Err:     fmt.Errorf("レート制限の待機状態の解除に失敗しました: %w", err),
+			})
+			return result
+		}
+		result.RateLimit = &RateLimitOutcome{
+			Phase:      RateLimitPhaseRecovered,
+			State:      RateLimitState{},
+			BlockedFor: blockedFor,
 		}
 	}
 	return result
+}
+
+// recordRateLimitHit は 429 を受けたときの待機状態を保存し、顛末を返す。
+//
+// 保存に失敗した場合は result.Err を上書きして致命的エラーに切り替える。
+// 待機状態を書けないまま「見送った」ことにすると、次回も同じだけ API を
+// 叩いてしまい、バックオフが効かなくなるため。
+func (uc *CollectStatus) recordRateLimitHit(
+	ctx context.Context,
+	accountID domain.AccountID,
+	state RateLimitState,
+	now time.Time,
+	result *AccountResult,
+) *RateLimitOutcome {
+	next := state.next(now)
+	if err := uc.repo.SaveRateLimitState(ctx, accountID, next); err != nil {
+		result.Err = fmt.Errorf("レート制限の待機状態の保存に失敗しました: %w", err)
+		return nil
+	}
+	return &RateLimitOutcome{
+		Phase:      RateLimitPhaseHit,
+		State:      next,
+		BlockedFor: next.BlockedFor(now),
+		RetryIn:    next.Until.Sub(now),
+	}
 }
 
 // deviceRecords は処理対象のデバイス一覧を返す。

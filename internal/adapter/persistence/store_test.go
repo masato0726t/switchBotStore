@@ -122,8 +122,11 @@ func TestSaveAccount_発行するSQL(t *testing.T) {
 	insert, selectStmt := capture.pair(t)
 
 	assert.Equal(t,
-		"INSERT INTO `api_accounts` (`name`,`token`,`secret`,`devices_synced_at`,`created_at`,`updated_at`) "+
-			"VALUES (?,?,?,?,?,?) "+
+		"INSERT INTO `api_accounts` "+
+			"(`name`,`token`,`secret`,`devices_synced_at`,"+
+			"`rate_limited_until`,`rate_limited_since`,`rate_limit_failures`,"+
+			"`created_at`,`updated_at`) "+
+			"VALUES (?,?,?,?,?,?,?,?,?) "+
 			"ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`secret`=VALUES(`secret`)",
 		insert.SQL)
 
@@ -133,8 +136,14 @@ func TestSaveAccount_発行するSQL(t *testing.T) {
 		"updated_at を代入すると中身が同じでも毎回書き込みが発生する。列定義の ON UPDATE CURRENT_TIMESTAMP に任せる")
 	assertNotUpdated(t, insert.SQL, "devices_synced_at",
 		"更新対象に含めると毎回 NULL で上書きされ、デバイス一覧のキャッシュが効かなくなる")
+	assertNotUpdated(t, insert.SQL, "rate_limited_until",
+		"更新対象に含めると毎回 NULL で上書きされ、レート制限のバックオフが効かなくなる")
+	assertNotUpdated(t, insert.SQL, "rate_limited_since",
+		"更新対象に含めると毎回 NULL で上書きされ、制限が続いた時間を見失う")
+	assertNotUpdated(t, insert.SQL, "rate_limit_failures",
+		"更新対象に含めると毎回 0 で上書きされ、待機時間が伸びなくなる")
 
-	require.Len(t, insert.Vars, 6)
+	require.Len(t, insert.Vars, 9)
 	assert.Equal(t, "メインアカウント", insert.Vars[0])
 	assert.Equal(t, "tok1", insert.Vars[1])
 	assert.Equal(t, "sec1", insert.Vars[2])

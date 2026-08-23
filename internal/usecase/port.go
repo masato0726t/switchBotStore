@@ -43,6 +43,14 @@ type Repository interface {
 	// MarkDevicesSynced はデバイス一覧を API から取得した日時を記録する。
 	MarkDevicesSynced(ctx context.Context, accountID domain.AccountID, at time.Time) error
 
+	// LoadRateLimitState はレート制限の待機状態を読み出す。
+	// 待機していなければゼロ値を返す。
+	LoadRateLimitState(ctx context.Context, accountID domain.AccountID) (RateLimitState, error)
+
+	// SaveRateLimitState はレート制限の待機状態を保存する。
+	// ゼロ値を渡すと待機を解除する。
+	SaveRateLimitState(ctx context.Context, accountID domain.AccountID, state RateLimitState) error
+
 	// SaveDevice はデバイスを登録し、既に存在する場合は更新して ID を返す。
 	SaveDevice(ctx context.Context, accountID domain.AccountID, d domain.Device) (domain.DeviceRecordID, error)
 
